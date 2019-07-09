@@ -306,7 +306,7 @@ class DateTest(object):
                     self._levels = self._im.levels
                 plt.clabel(self._im, fmt='%1.0f', fontsize='small')
 
-            ax.set_title('KDE with %s Kernel and %s Bandwidth'%(str.capitalize(self.kde.kernel, self.kde.bandwidth))
+            ax.set_title('KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
 
 	    plt.tight_layout()
         plt.show(block=False)
@@ -335,5 +335,7 @@ class DateTest(object):
                 y = self._im.collections[i].get_paths()[j].vertices[:,1]
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
                 tmp.append(np.abs(a) / 1000.**2)
+            tmp.sort()
             self.areas[self._levels[i]] = tmp
+
         return
