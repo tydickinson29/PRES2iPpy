@@ -5,17 +5,21 @@ from statsmodels.regression.quantile_regression import QuantReg
 import statsmodels.api as sm
 import os
 import datetime
-from sys import argv
+import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
-def loadData(BEGINDATE):
+def loadData(BEGINDATE, length):
     BEGINDATE = datetime.datetime(1915,int(BEGINDATE[:2]),int(BEGINDATE[2:]))
-    #increment by 13 and then do <= when finding dates that match to get 14-day sum
-    ENDDATE = BEGINDATE + datetime.timedelta(days=13)
+    #example: increment by 13 and then do <= when finding dates that match to get 14-day sum
+    ENDDATE = BEGINDATE + datetime.timedelta(days=length-1)
     if (ENDDATE.month == 2) and (ENDDATE.day == 29):
         ENDDATE += datetime.timedelta(days=1)
-    YEAR = 1915
+
+    #Livneh runs from 1915 through 2011 so 97 years unless considering December 19 through December 31
+    #since it runs into next year, so I must ignore the Jan. 1915 days and Dec. 2011 days
+    totalYears = 97 if (BEGINDATE.month <= 12) and (BEGINDATE.day <= 18) else 96
+    years = sm.add_constant(np.arange(1915, 1915+totalYears, 1))
 
     path = '/home/tdickinson/data/Livneh/'
     files = os.listdir(path)
@@ -37,11 +41,18 @@ def loadData(BEGINDATE):
     else:
         locs = np.where(((months==BEGINDATE.month)&(days>=BEGINDATE.day)) | ((months==ENDDATE.month)&(days<=ENDDATE.day)))[0]
 
-    #I have 97 years in total, so locs should have size of 1358
-    if locs.size != 1358:
-        leapDay = np.where((months==2)&(days==29))[0]
-        leapDayLocs = [np.where(locs==i)[0][0] for i in leapDay]
-        locs = np.delete(locs,leapDayLocs)
+    #check to ensure the correct number of days (i.e., remove leap days or beginning January days in late December start)
+    while locs.size != 14*totalYears:
+        if BEGINDATE.month == 2:
+            leapDay = np.where((months==2)&(days==29))[0]
+            badLocs = [np.where(locs==i)[0][0] for i in leapDay]
+        else:
+            #discard the Jan. 1915 locs and Dec. 2011 locs
+            daysInDecember = 31 - BEGINDATE.day + 1
+            daysInJanuary = ENDDATE.day
+            badLocs = np.append(locs[:daysInJanuary], locs[-daysInDecember:])
+            badLocs = [np.where(locs==i)[0][0] for i in badLocs]
+        locs = np.delete(locs,badLocs)
 
     precip = nc.variables['prec'][locs,:,:]
     precip = precip.filled(np.nan)
@@ -52,17 +63,32 @@ def loadData(BEGINDATE):
     t,y,x = precip.shape
     precip = precip.reshape(t,y*x)
     nonNaN = np.where(~np.isnan(precip[0,:]))[0]
-    return precip[:,nonNaN], precip.shape[1], nonNaN
+    return precip[:,nonNaN], precip.shape[1], nonNaN, years
 
 def main():
+    #unpack command line arguments from user
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-q", "--quantile", type=float, help="quantile for regression model")
+    parser.add_argument("-p", "--percentile", type=float, help="percentile for regression model. Will be converted to a decimal in [0,1]")
+    parser.add_argument("-b", "--begin", type=str, help="begin date for window")
+    parser.add_argument("-l", "--length", type=int, help="length of window")
+    args = parser.parse_args()
+
+    qUser = args.quantile
+    pUser = args.percentile
+    BEGINDATE_STR = args.begin
+    LENGTH = args.length
+    if pUser is not None:
+        pUser /= 100
+
+    if (qUser != pUser) and (pUser is not None) and (qUser is not None):
+        raise ValueError('Input for the quantile and percentile (in decimal form) do not match. Either only enter one or ensure they are the same')
+
     #initialize communicator, get rank of each thread, and get total number of threads
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    years = sm.add_constant(np.arange(1915,2012,1))
-    BEGINDATE_STR = argv[1]
-    qUser = float(argv[2])
     precip = None
     totalGrids = None
     nonNaN = None
@@ -70,10 +96,11 @@ def main():
     allIntercepts = None
 
     if rank == 0:
-        precip, totalGrids, nonNaN = loadData(BEGINDATE_STR)
+        precip, totalGrids, nonNaN, years = loadData(BEGINDATE_STR, LENGTH)
         precip = np.array_split(precip,size,axis=1)
 
     data = comm.scatter(precip,root=0)
+    years = comm.scatter(years)
     numOfSlopes = data.shape[1]
 
     slopes = np.zeros((numOfSlopes,))*np.nan
