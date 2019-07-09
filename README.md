@@ -8,8 +8,13 @@ PRES2iP stands for Prediction of Rainfall Extremes at Subseasonal to Seasonal Pe
 
 ## Versions of Packages Used
 basemap = 1.2.0
+
 netcdf4 = 1.5.1.2
+
 numpy = 1.16.4
+
 matplotlib = 2.2.3
+
 sklearn = 0.20.3
+
 statsmodels = 0.9.0
