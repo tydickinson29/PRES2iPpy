@@ -9,6 +9,9 @@ import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
+class InputError(Exception):
+    pass
+
 def loadData(BEGINDATE, length):
     BEGINDATE = datetime.datetime(1915,int(BEGINDATE[:2]),int(BEGINDATE[2:]))
     #example: increment by 13 and then do <= when finding dates that match to get 14-day sum
@@ -81,8 +84,13 @@ def main():
     if pUser is not None:
         pUser /= 100
 
-    if (qUser != pUser) and (pUser is not None) and (qUser is not None):
-        raise ValueError('Input for the quantile and percentile (in decimal form) do not match. Either only enter one or ensure they are the same')
+    if (qUser is None) and (pUser is None):
+        raise InputError('Neither the desired quantile or percentile were entered.')
+    elif (qUser != pUser) and (pUser is not None) and (qUser is not None):
+        raise ValueError('Input for the quantile (%s) and percentile (%s) do not match. Either only enter one or ensure they are the same'%(qUser, pUser))
+    elif (qUser is None) and (pUser is not None):
+        qUser = pUser
+
 
     #initialize communicator, get rank of each thread, and get total number of threads
     comm = MPI.COMM_WORLD
@@ -92,6 +100,7 @@ def main():
     precip = None
     totalGrids = None
     nonNaN = None
+    years = None
     allSlopes = None
     allIntercepts = None
 
@@ -99,8 +108,8 @@ def main():
         precip, totalGrids, nonNaN, years = loadData(BEGINDATE_STR, LENGTH)
         precip = np.array_split(precip,size,axis=1)
 
-    data = comm.scatter(precip,root=0)
-    years = comm.scatter(years)
+    data = comm.scatter(precip, root=0)
+    years = comm.scatter(years, root=0)
     numOfSlopes = data.shape[1]
 
     slopes = np.zeros((numOfSlopes,))*np.nan
