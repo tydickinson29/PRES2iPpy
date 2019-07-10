@@ -122,68 +122,6 @@ class DateTest(object):
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
 
-
-    def _kde(self,x,y,weighted,**kwargs):
-        """Kernel density estimation helper method.
-
-        Additional keyword arguments are accepted to customize the KernelDensity method.
-        Every third Livneh grid point is used; thus, the KDE grid is every 3/16 of a
-        degree. Areas outside the CONUS and a small portion of Canada near the Colombia
-        River are set as NaN. Z is assigned as a public attribute and is the result of the
-        KDE analysis. This method is called every time when makePlot() is called to ensure
-        the correct kernel and bandwidth are used in case they change from the first call.
-
-        Parameters
-        ----------
-        x : array_like, shape (n_longitudes)
-            1-D array of longitudes to get coordinates of extreme points.
-        y : array_like, shape (n_latitudes)
-            1-D array of latitudes to get coordinates of extreme points.
-        weighted : True or None
-            If True, weight the KDE fit based on magnitude over the extreme threshold.
-            If None, do not assign weights.
-        **kwargs
-            Additional keyword arguments to sklearn's KernelDensity method.
-
-        Returns
-        -------
-        X, Y : array_like, shape (n_latitudes / 5, n_longitudes / 5)
-            2-D arrays of latitude, longitude grid for the KDE routine.
-        """
-        locs = np.ma.where(self.diffBinary == 1)
-        Xtrain = np.zeros((locs[0].size, 2)) * np.nan
-
-        if weighted:
-            weighted = np.zeros((locs[0].size)) * np.nan
-            for i in range(Xtrain.shape[0]):
-                Xtrain[i,0] = y[locs[0][i], locs[1][i]]
-                Xtrain[i,1] = x[locs[0][i], locs[1][i]]
-                weighted[i] = self.diff[locs[0][i],locs[1][i]]
-            #divide by total so sum of weights is 1
-            weighted /= np.sum(weighted)
-        else:
-            for i in range(Xtrain.shape[0]):
-                Xtrain[i,0] = y[locs[0][i], locs[1][i]]
-                Xtrain[i,1] = x[locs[0][i], locs[1][i]]
-
-        #convert from lat/lon to radians
-        XtrainRad = Xtrain * np.pi / 180.
-        #grid evaluating KDE to
-        X, Y = np.meshgrid(self.lon[::3], self.lat[::3])
-        xy = np.vstack((Y.ravel(), X.ravel())).T
-        xy *= np.pi / 180.
-
-        kwargs.setdefault('bandwidth', 0.02)
-        kwargs.setdefault('metric', 'haversine')
-        kwargs.setdefault('kernel', 'epanechnikov')
-        kwargs.setdefault('algorithm', 'ball_tree')
-        self.kde = KernelDensity(**kwargs)
-        self.kde.fit(XtrainRad, sample_weight=weighted)
-        self.Z = np.exp(self.kde.score_samples(xy))
-        self.Z = self.Z.reshape(X.shape)
-        #self.Z = np.where(np.isnan(self.obs[::3,::3]), np.nan, self.Z)
-        return X, Y
-
     def getObs(self):
         """Method to retrive Livneh reanalyses from the year specified by the object.
 
@@ -212,7 +150,71 @@ class DateTest(object):
             self.diffBinary = np.ma.where(self.diff >= 0, 1, 0)
         return
 
-    def makePlot(self, kde=False, filled=True, **kwargs):
+    def kde(self, weighted=False, **kwargs):
+        """Method to calculate the kernel density estimate for a given period.
+
+        Additional keyword arguments are accepted to customize the KernelDensity class.
+        Every third Livneh grid point is used; thus, the KDE grid is every 3/16 of a
+        degree. Areas outside the CONUS and a small portion of Canada near the Colombia
+        River are set as NaN. Z is assigned as a public attribute and is the result of the
+        KDE analysis.
+
+        Default arguments passed to the KernelDensity class are the haversine distance metric,
+        the epanechnikov kernel with 0.02 bandwidth, and the ball_tree algorithm.
+
+        Parameters
+        ----------
+        weighted : boolean or None
+            If True, weight the KDE fit based on magnitude over the extreme threshold.
+            If None, do not assign weights.
+        **kwargs
+            Additional keyword arguments to sklearn's KernelDensity method.
+
+        Returns
+        -------
+        X, Y : array_like, shape (n_latitudes / 5, n_longitudes / 5)
+            2-D arrays of latitude, longitude grid for the KDE routine.
+        """
+        if (type(weighted) != type(True)) and (type(weighted) != type(None)):
+            raise TypeError('weighted must be a bool or NoneType argument.')
+        elif not weighted:
+            weighted = None
+
+        x,y = np.meshgrid(self.lon, self.lat)
+        locs = np.ma.where(self.diffBinary == 1)
+        Xtrain = np.zeros((locs[0].size, 2)) * np.nan
+
+        if weighted:
+            weighted = np.zeros((locs[0].size)) * np.nan
+            for i in range(Xtrain.shape[0]):
+                Xtrain[i,0] = y[locs[0][i], locs[1][i]]
+                Xtrain[i,1] = x[locs[0][i], locs[1][i]]
+                weighted[i] = self.diff[locs[0][i],locs[1][i]]
+            #divide by total so sum of weights is 1
+            weighted /= np.sum(weighted)
+        else:
+            for i in range(Xtrain.shape[0]):
+                Xtrain[i,0] = y[locs[0][i], locs[1][i]]
+                Xtrain[i,1] = x[locs[0][i], locs[1][i]]
+
+        #convert from lat/lon to radians
+        XtrainRad = Xtrain * np.pi / 180.
+        #grid evaluating KDE to (currently every third Livneh grid point; may change in future)
+        self.kdeGridX, self.kdeGridY = np.meshgrid(self.lon[::3], self.lat[::3])
+        xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
+        xy *= np.pi / 180.
+
+        kwargs.setdefault('bandwidth', 0.02)
+        kwargs.setdefault('metric', 'haversine')
+        kwargs.setdefault('kernel', 'epanechnikov')
+        kwargs.setdefault('algorithm', 'ball_tree')
+        self.kde = KernelDensity(**kwargs)
+        self.kde.fit(XtrainRad, sample_weight=weighted)
+        self.Z = np.exp(self.kde.score_samples(xy))
+        self.Z = self.Z.reshape(self.kdeGridX.shape)
+        return
+
+    def makePlot(self, filled=True, **kwargs):
         """Method to make 3- or 4-panel plot based on instance attributes.
 
         Top left panel will always be the rainfall given by the Livneh dataset.
@@ -228,26 +230,9 @@ class DateTest(object):
         filled : boolean
             If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
         **kwargs
-            Additional keyword arguments accepted by sklearn's KernelDensity class or keyword
-            arugments accepted in matplotlib's contour/contourf
+            Additional keyword arguments accepted in matplotlib's contour/contourf
         """
-        #if 'levels' is a key in kwargs, levels will be the supplied list. Otherwise, it will be False
-        #kwargs will also no longer have 'levels' as a key
-        self._levels = kwargs.pop('levels', False)
-        self._colors = kwargs.pop('colors', None)
-        self._cmap = kwargs.pop('cmap', 'Reds' if self._colors is None else None)
-
-        _extend = ['neither', 'both', 'min', 'max']
-        extend = kwargs.pop('extend', 'neither')
-        if extend not in _extend:
-            raise KeyError('%s is not an appropriate argument for extend. Your options are %s'%(extend, _extend))
-
-        weighted = kwargs.pop('weighted', None)
-        if (type(weighted) != type(True)) and (type(weighted) != type(None)):
-            raise ValueError('weighted must be a bool or NoneType argument.')
-        elif not weighted:
-            weighted = None
-
+        
         x,y = np.meshgrid(self.lon,self.lat)
         boundsPrecip = np.linspace(0,600,17)
         colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
@@ -281,8 +266,8 @@ class DateTest(object):
                 im = m.contourf(x,y,contour,levels=[0,0.5,1],colors=['white','green'],latlon=True)
                 ax.set_title('(c) Difference (a minus b)')
 
-        if kde:
-            X, Y = self._kde(x,y,weighted,**kwargs)
+        try:
+            getattr(self, 'Z')
             ax = fig.add_subplot(224)
             m = Basemap(projection='aea',resolution='l',
                 llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
@@ -291,24 +276,19 @@ class DateTest(object):
             m.drawcountries()
             m.drawstates()
             if filled:
-                if self._levels is not False:
-                    self._im = m.contourf(X,Y,self.Z,latlon=True,cmap='Reds',levels=self._levels,extend=extend)
-                else:
-                    self._im = m.contourf(X,Y,self.Z,latlon=True,cmap='Reds',extend=extend)
-                    self._levels = self._im.levels
+                self._im = m.contourf(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
                 cbar = m.colorbar(self._im,'bottom')
                 cbar.set_label('Density')
             else:
-                if self._levels is not False:
-                    self._im = m.contour(X,Y,self.Z,latlon=True,levels=self._levels,cmap=self._cmap,colors=self._colors)
-                else:
-                    self._im = m.contour(X,Y,self.Z,latlon=True,cmap=self._cmap,colors=self._colors)
-                    self._levels = self._im.levels
+                self._im = m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
                 plt.clabel(self._im, fmt='%1.0f', fontsize='small')
 
             ax.set_title('KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
+            self._levels = self._im.levels
+        except AttributeError:
+            pass
 
-	    plt.tight_layout()
+        plt.tight_layout()
         plt.show(block=False)
         return
 
@@ -316,7 +296,8 @@ class DateTest(object):
         """Method to calculate the area of the polygons in the KDE map shown by makePlot.
         The vertices are gathered from the objected returned by matplotlib's ```contourf```
         method and the area is calculated using Green's Theorem. Requires the makePlot method
-        to have been called since it uses the private attributes 'im' and 'levels'
+        to have been called since it requires vertices to describe the polygon that we are
+        finding the area of!
 
         Areas for each contour are stored in a dictionary and assigned as an instance attribute
         and have units of squared kilometers.
@@ -324,7 +305,8 @@ class DateTest(object):
         try:
             getattr(self, '_im')
         except AttributeError:
-            self.makePlot(kde=True)
+            self.kde()
+            self.makePlot()
 
         numContours = len(self._im.collections)
         self.areas = {}
