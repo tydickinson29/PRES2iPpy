@@ -23,16 +23,32 @@ class DateTest(object):
 
     Attributes
     ----------
-    lat : array_like, shape (444,)
-        1-D array specifying latitudes for the quantile regression model grid.
-    lon : array_like, shape (922)
-        1-D array specifying longitudes for the quantile regression model grid.
-    intercept : array_like, shape (lat, lon)
-        2-D array holding the y-intercepts of the quantile regression model.
-    slope : array_like, shape (lat, lon)
-        2-D array holding the slopes of the quantile regression model.
-
+    lat : array, shape (444,)
+        Latitudes for the quantile regression model grid.
+    lon : array, shape (922)
+        Longitudes for the quantile regression model grid.
+    intercept : array, shape (lat, lon)
+        y-intercepts of the quantile regression model.
+    slope : array, shape (lat, lon)
+        Slopes of the quantile regression model.
+    model : array, shape (lat, lon)
+        95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``.
+    obs : array, shape (lat, lon)
+        Recorded precipitation from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
+    diff : array, shape (lat, lon)
+        Difference between ``obs`` and ``model``. Filled after :func:`getObs` is called.
+    diffBinary : array, shape (lat, lon)
+        1 where ``diff`` is positive and 0 where ``diff`` is negative. Will be changing in future updates. Filled after :func:`getObs` is called.
+    kdeGridX : array, shape (lat/3, lon/3)
+        Longitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
+    kdeGridY : array, shape (lat/3, lon/3)
+        Latitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
+    Z : array, shape (kdeGridX, kdeGridY)
+        Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
+    areas : dict
+        Areas of KDE (:func:`kde`) contours drawn in :func:`makePlot` in square kilometers. Filled after :func:`getAreas` is called.
     """
+
     with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
         lat = nc.variables['lat'][:]
         lon = nc.variables['lon'][:]
@@ -59,6 +75,14 @@ class DateTest(object):
         self.year = year
         loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
         self.model = self.intercept[loc,:,:] + self.slope[loc,:,:]*self.year
+
+        self.obs = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.diff = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.diffBinary = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.kdeGridX = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
+        self.kdeGridY = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
+        self.Z = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
+        self.areas = {}
 
     @property
     def month(self):
@@ -111,13 +135,13 @@ class DateTest(object):
 
     @property
     def DATE_BEGIN(self):
-        """Set the beginning date instance attribute. ``DATE_BEGIN`` will be type ``datetime``.
+        """Set the beginning date instance attribute. ``DATE_BEGIN`` will be type `datetime <https://docs.python.org/2/library/datetime.html>`_.
         """
         return datetime.datetime(self.year, self.month, self.day)
 
     @property
     def DATE_END(self):
-        """Set the ending date instance attribute. ``DATE_END`` will be type ``datetime``.
+        """Set the ending date instance attribute. ``DATE_END`` will be type `datetime <https://docs.python.org/2/library/datetime.html>`_.
         ``DATE_BEGIN`` is incremented by 13 days to have an inclusive 14-day window.
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
@@ -155,8 +179,7 @@ class DateTest(object):
 
         Additional keyword arguments are accepted to customize the KernelDensity class.
         Every third Livneh grid point is used; thus, the KDE grid is every 3/16 of a
-        degree. Areas outside the CONUS and a small portion of Canada near the Colombia
-        River are set as NaN. Z is assigned as a public attribute and is the result of the
+        degree. Z is assigned as a public attribute and is the result of the
         KDE analysis.
 
         Default arguments passed to the KernelDensity class are the haversine distance metric,
@@ -168,12 +191,9 @@ class DateTest(object):
             If True, weight the KDE fit based on magnitude over the extreme threshold.
             If None, do not assign weights.
         **kwargs
-            Additional keyword arguments to sklearn's KernelDensity method.
-
-        Returns
-        -------
-        X, Y : array_like, shape (n_latitudes / 5, n_longitudes / 5)
-            2-D arrays of latitude, longitude grid for the KDE routine.
+            Additional keyword arguments to scikit-learn's `KernelDensity
+            <https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KernelDensity.html#sklearn.neighbors.KernelDensity>`_
+            class.
         """
         if (type(weighted) != type(True)) and (type(weighted) != type(None)):
             raise TypeError('weighted must be a bool or NoneType argument.')
@@ -228,9 +248,10 @@ class DateTest(object):
         filled : boolean
             If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
         **kwargs
-            Additional keyword arguments accepted in matplotlib's contour/contourf
+            Additional keyword arguments accepted by matplotlib's `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
+            method and matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
         """
-        
+
         x,y = np.meshgrid(self.lon,self.lat)
         boundsPrecip = np.linspace(0,600,17)
         colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
@@ -292,7 +313,8 @@ class DateTest(object):
 
     def getAreas(self):
         """Method to calculate the area of the polygons in the KDE map shown by makePlot.
-        The vertices are gathered from the objected returned by matplotlib's ```contourf```
+        The vertices are gathered from the objected returned by matplotlib's
+        `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
         method and the area is calculated using Green's Theorem. Requires the makePlot method
         to have been called since it requires vertices to describe the polygon that we are
         finding the area of!
