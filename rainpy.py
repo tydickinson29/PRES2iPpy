@@ -225,8 +225,6 @@ class DateTest(object):
 
         Parameters
         ----------
-        kde : boolean
-            If False (default), do not calculate and plot KDE grid. Otherwise, show the KDE map.
         filled : boolean
             If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
         **kwargs
