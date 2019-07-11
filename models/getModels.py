@@ -109,7 +109,7 @@ def main():
         precip = np.array_split(precip,size,axis=1)
 
     data = comm.scatter(precip, root=0)
-    years = comm.scatter(years, root=0)
+    years = comm.bcast(years, root=0)
     numOfSlopes = data.shape[1]
 
     slopes = np.zeros((numOfSlopes,))*np.nan
