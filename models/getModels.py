@@ -81,6 +81,13 @@ def main():
     pUser = args.percentile
     BEGINDATE_STR = args.begin
     LENGTH = args.length
+
+    if LENGTH is None:
+        raise InputError('No window length was input.')
+
+    if BEGINDATE_STR is None:
+        raise InputError('No beginning date was input.')
+
     if pUser is not None:
         pUser /= 100
 
