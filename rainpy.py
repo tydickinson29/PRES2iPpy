@@ -32,13 +32,17 @@ class DateTest(object):
     slope : array, shape (lat, lon)
         Slopes of the quantile regression model.
     model : array, shape (lat, lon)
-        95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``.
+        95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``
     obs : array, shape (lat, lon)
-        Recorded precipitation from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
+        Recorded precipitation each day from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
+    total : array, shape(lat, lon)
+        Total precipitation from the Livneh dataset (i.e., sum at each grid point of ``obs``). Filled after :func:`getObs` is called.
     diff : array, shape (lat, lon)
         Difference between ``obs`` and ``model``. Filled after :func:`getObs` is called.
     diffBinary : array, shape (lat, lon)
         1 where ``diff`` is positive and 0 where ``diff`` is negative. Will be changing in future updates. Filled after :func:`getObs` is called.
+    daysOver2 : array, shape (lat, lon)
+        Number of days in the 14-day period that experienced at least 2.54 mm (1 in) of rainfall.
     kdeGridX : array, shape (lat/3, lon/3)
         Longitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
     kdeGridY : array, shape (lat/3, lon/3)
@@ -77,12 +81,16 @@ class DateTest(object):
         self.model = self.intercept[loc,:,:] + self.slope[loc,:,:]*self.year
 
         self.obs = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.total = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.diff = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.diffBinary = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.kdeGridX = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.kdeGridY = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.Z = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.areas = {}
+
+    def __repr__(self):
+        return 'DateTest(month=%s, day=%s, year=%s)'%(self.month, self.day, self.year)
 
     @property
     def month(self):
@@ -169,9 +177,42 @@ class DateTest(object):
             else:
                 locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
 
-            self.obs = np.nansum(self.obs[locs,:,:],axis=0)
-            self.diff = self.obs - self.model
+            self.obs = self.obs[locs,:,:]
+            self.total = np.nansum(self.obs,axis=0)
+            self.diff = self.total - self.model
             self.diffBinary = np.ma.where(self.diff >= 0, 1, 0)
+
+            self.obs = self.obs.filled(np.nan)
+        return
+
+    def checkDays(self, **kwargs):
+        """Method to calculate the number of days each grid point experienced
+        at least 2.54 mm (0.1 in) of rainfall for the given 14-day period
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
+        """
+        t,y,x = self.obs.shape
+        obs = self.obs.reshape(t,y*x)
+
+        #find the number of times each column goes over 2.54 mm, then count the bins from 0 to the number of columns
+        self.daysOver2 = np.bincount(np.where(obs >= 2.54)[1], minlength=obs.shape[1])
+        self.daysOver2 = self.daysOver2.reshape(y,x)
+
+        x,y = np.meshgrid(self.lon,self.lat)
+        fig = plt.figure(figsize=(8,6))
+        m = Basemap(projection='aea',resolution='l',
+            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+        m.drawcoastlines()
+        m.drawcountries()
+        m.drawstates()
+        im = m.contourf(x, y, self.daysOver2, latlon=True, **kwargs)
+        m.colorbar(im, 'bottom')
+        plt.tight_layout()
+        plt.show(block=False)
         return
 
     def kde(self, weighted=False, **kwargs):
@@ -261,7 +302,7 @@ class DateTest(object):
         normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
 
         fig = plt.figure(figsize=(13,10))
-        for plot_num, contour in enumerate([self.obs,self.model,self.diffBinary]):
+        for plot_num, contour in enumerate([self.total,self.model,self.diffBinary]):
             ax = fig.add_subplot(int('22'+str(plot_num+1)))
             m = Basemap(projection='aea',resolution='l',
                 llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
@@ -285,8 +326,7 @@ class DateTest(object):
                 im = m.contourf(x,y,contour,levels=[0,0.5,1],colors=['white','green'],latlon=True)
                 ax.set_title('(c) Difference (a minus b)')
 
-        try:
-            getattr(self, 'Z')
+        if np.where(~np.isnan(self.Z))[0].size != 0:
             ax = fig.add_subplot(224)
             m = Basemap(projection='aea',resolution='l',
                 llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
@@ -304,7 +344,7 @@ class DateTest(object):
 
             ax.set_title('KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
             self._levels = self._im.levels
-        except AttributeError:
+        else:
             pass
 
         plt.tight_layout()
