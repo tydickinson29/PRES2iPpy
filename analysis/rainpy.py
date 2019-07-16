@@ -38,11 +38,15 @@ class DateTest(object):
     total : array, shape(lat, lon)
         Total precipitation from the Livneh dataset (i.e., sum at each grid point of ``obs``). Filled after :func:`getObs` is called.
     diff : array, shape (lat, lon)
-        Difference between ``obs`` and ``model``. Filled after :func:`getObs` is called.
-    diffBinary : array, shape (lat, lon)
-        1 where ``diff`` is positive and 0 where ``diff`` is negative. Will be changing in future updates. Filled after :func:`getObs` is called.
+        Difference between ``obs`` and ``model``. Filled after :func:`getObs` or :func:`plotExtremePoints` is called.
     daysOver2 : array, shape (lat, lon)
-        Number of days in the 14-day period that experienced at least 2.54 mm (1 in) of rainfall.
+        Number of days in the 14-day period that experienced at least 2.54 mm (1 in) of rainfall. Filled after :func:`plotRainyDays` or :func:`plotExtremePoints` is called.
+    totals3Day : array, shape (lat, lon)
+        3-day rainfall total for the day of maximum precipitation and the two days surrounding for each point in space. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
+    frac : array, shape (lat, lon)
+        Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
+    extreme : array, shape (lat, lon)
+        True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`plotExtremePoints` is called.
     kdeGridX : array, shape (lat/3, lon/3)
         Longitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
     kdeGridY : array, shape (lat/3, lon/3)
@@ -83,7 +87,9 @@ class DateTest(object):
         self.obs = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.total = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.diff = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.diffBinary = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.daysOver2 = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.frac = np.zeros((self.lat.size, self.lon.size)) * np.nan
+        self.extreme = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.kdeGridX = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.kdeGridY = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.Z = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
@@ -154,6 +160,67 @@ class DateTest(object):
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
 
+    def _checkDays(self, plot=False, **kwargs):
+        """Helper method to calculate the number of days each grid point experienced
+        at least 2.54 mm (0.1 in) of rainfall for the given 14-day period.
+        """
+        t,y,x = self.obs.shape
+        obs = self.obs.reshape(t,y*x)
+
+        #find the number of times each column goes over 2.54 mm, then count the bins from 0 to the number of columns
+        self.daysOver2 = np.bincount(np.where(obs >= 2.54)[1], minlength=obs.shape[1])
+        self.daysOver2 = self.daysOver2.reshape(y,x)
+        return
+
+    def _checkTotals(self):
+        """Helper method to check if the day with the maximum precipitation and the two
+        days surrounding it exceed 50% of the total rainfall received in the 14-day
+        period.
+        """
+        t,y,x = self.obs.shape
+        obs = self.obs.reshape(t,y*x)
+
+        nonNaN = np.where(~np.isnan(obs[0,:]))[0]
+        tmpTotals3Day = np.zeros((3, obs.shape[1]))*np.nan
+        for i in nonNaN:
+            loc = np.argmax(obs[:,i], axis=0)
+            if loc == 0:
+                #use first 3 values if the max rain is on day 1
+                tmpTotals3Day[:,i] = obs[:3,i]
+            elif loc == (t-1):
+                #use last 3 values if the max rain is on day 14; t-2 is the second to last point
+                tmpTotals3Day[:,i] = obs[-3:,i]
+            else:
+                tmpTotals3Day[:,i] = obs[loc-1:loc+2,i]
+
+        self.totals3Day = np.nansum(tmpTotals3Day, axis=0)
+        self.frac = self.totals3Day / self.total.reshape(y*x)
+        self.frac = self.frac.reshape(y,x)
+        return
+
+    def _getExtremePoints(self, plot=False):
+        """Helper method to find which points are extreme.
+
+        Points must have exceeded the 14-day 95th percentile, have experienced
+        at least 5 days of rainfall at or exceeding 2.54 mm (0.1 in), and had less
+        than 50% of the total rainfall fall in the day of maximum precipitation and
+        the 2 surrounding days.
+
+        Parameters
+        ----------
+        plot : boolean
+            If True, make and show a plot of the extreme points. Defaults to False.
+        """
+        if np.where(~np.isnan(self.diff))[0].size == 0:
+            self.getObs()
+        if np.where(~np.isnan(self.daysOver2))[0].size == 0:
+            self._checkDays()
+        if np.where(~np.isnan(self.frac))[0].size == 0:
+            self._checkTotals()
+
+        self.extreme = (self.diff >= 0) & (self.daysOver2 >= 5) & (self.frac <= 0.5)
+        return
+
     def getObs(self):
         """Method to retrive Livneh reanalyses from the year specified by the object.
 
@@ -178,28 +245,22 @@ class DateTest(object):
                 locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
 
             self.obs = self.obs[locs,:,:]
-            self.total = np.nansum(self.obs,axis=0)
-            self.diff = self.total - self.model
-            self.diffBinary = np.ma.where(self.diff >= 0, 1, 0)
-
             self.obs = self.obs.filled(np.nan)
+            self.total = np.sum(self.obs,axis=0)
+            self.diff = self.total - self.model
         return
 
-    def checkDays(self, **kwargs):
-        """Method to calculate the number of days each grid point experienced
-        at least 2.54 mm (0.1 in) of rainfall for the given 14-day period
+    def plotRainyDays(self):
+        """Method to plot the number of days that experienced at least 2.54 mm (0.1 in)
+        of rainfall for the given 14-day period.
 
         Parameters
         ----------
         **kwargs
             Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
         """
-        t,y,x = self.obs.shape
-        obs = self.obs.reshape(t,y*x)
-
-        #find the number of times each column goes over 2.54 mm, then count the bins from 0 to the number of columns
-        self.daysOver2 = np.bincount(np.where(obs >= 2.54)[1], minlength=obs.shape[1])
-        self.daysOver2 = self.daysOver2.reshape(y,x)
+        if np.where(~np.isnan(self.daysOver2))[0].size == 0:
+            self._checkDays()
 
         x,y = np.meshgrid(self.lon,self.lat)
         fig = plt.figure(figsize=(8,6))
@@ -210,6 +271,56 @@ class DateTest(object):
         m.drawcountries()
         m.drawstates()
         im = m.contourf(x, y, self.daysOver2, latlon=True, **kwargs)
+        m.colorbar(im, 'bottom')
+        plt.tight_layout()
+        plt.show(block=False)
+
+    def plot3DayTotals(self, **kwargs):
+        """Method to plot the fraction of rainfall that fell on the day of maximum
+        precipitation and the two days surrounding. Uses the first 3 days if the day
+        of the maximum was day 1 of the event; uses the last 3 days if the day of the
+        maximum was day 14 of the event.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
+        """
+        if np.where(~np.isnan(self.frac))[0].size != 0:
+            self._checkTotals()
+
+        x,y = np.meshgrid(self.lon,self.lat)
+        fig = plt.figure(figsize=(8,6))
+        m = Basemap(projection='aea',resolution='l',
+            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+        m.drawcoastlines()
+        m.drawcountries()
+        m.drawstates()
+        im = m.contourf(x, y, self.frac, latlon=True, **kwargs)
+        m.colorbar(im, 'bottom')
+        plt.tight_layout()
+        plt.show(block=False)
+
+    def plotExtremePoints(self):
+        """Method to plot the points that are labeled as extreme. Extreme points are colored
+        green while non-extreme points are colored white. A point is labeled as extreme if
+        its 14-day total rainfall exceeded the 95th percentile, it experienced at least 5 days
+        of rainfall of at least 2.54 mm (0.1 in), and it did not have more than 50% of the total
+        precipitation fall on the day of maximum rainfall and the surrounding 2 days.
+        """
+        if np.where(~np.isnan(self.extreme))[0].size == 0:
+            self._getExtremePoints()
+
+        x,y = np.meshgrid(self.lon,self.lat)
+        fig = plt.figure(figsize=(8,6))
+        m = Basemap(projection='aea',resolution='l',
+            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+        m.drawcoastlines()
+        m.drawcountries()
+        m.drawstates()
+        im = m.contourf(x, y, self.extreme, latlon=True, levels=[0,0.5,1], colors=['white','green'])
         m.colorbar(im, 'bottom')
         plt.tight_layout()
         plt.show(block=False)
@@ -241,8 +352,11 @@ class DateTest(object):
         elif not weighted:
             weighted = None
 
+        if np.where(~np.isnan(self.extreme))[0].size == 0:
+            self._getExtremePoints()
+
         x,y = np.meshgrid(self.lon, self.lat)
-        locs = np.ma.where(self.diffBinary == 1)
+        locs = np.ma.where(self.extreme == 1)
         Xtrain = np.zeros((locs[0].size, 2)) * np.nan
 
         if weighted:
@@ -275,6 +389,19 @@ class DateTest(object):
         self.Z = self.Z.reshape(self.kdeGridX.shape)
         return
 
+    def calcKDEPercentile(self, perc=95):
+        """Method to return a KDE density for a given percentile.
+
+        Parameters
+        ----------
+        perc : float in range of [0,100]
+            Percentile to find in the KDE distribution; must be between 0 and 100, inclusive (defaults to 95)
+        """
+        if np.where(~np.isnan(self.Z))[0].size == 0:
+            self.kde()
+        else:
+            return np.nanpercentile(a=self.Z, q=perc)
+
     def makePlot(self, filled=True, **kwargs):
         """Method to make 3- or 4-panel plot based on instance attributes.
 
@@ -302,7 +429,7 @@ class DateTest(object):
         normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
 
         fig = plt.figure(figsize=(13,10))
-        for plot_num, contour in enumerate([self.total,self.model,self.diffBinary]):
+        for plot_num, contour in enumerate([self.total,self.model,self.extreme]):
             ax = fig.add_subplot(int('22'+str(plot_num+1)))
             m = Basemap(projection='aea',resolution='l',
                 llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
@@ -324,7 +451,7 @@ class DateTest(object):
                 cbar.set_label('mm')
             else:
                 im = m.contourf(x,y,contour,levels=[0,0.5,1],colors=['white','green'],latlon=True)
-                ax.set_title('(c) Difference (a minus b)')
+                ax.set_title('(c) Exceeded 95th Percentile and had 5 Rainy Days')
 
         if np.where(~np.isnan(self.Z))[0].size != 0:
             ax = fig.add_subplot(224)
@@ -379,5 +506,4 @@ class DateTest(object):
                 tmp.append(np.abs(a) / 1000.**2)
             tmp.sort()
             self.areas[self._levels[i]] = tmp
-
         return
