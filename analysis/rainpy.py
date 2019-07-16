@@ -250,7 +250,7 @@ class DateTest(object):
             self.diff = self.total - self.model
         return
 
-    def plotRainyDays(self):
+    def plotRainyDays(self, **kwargs):
         """Method to plot the number of days that experienced at least 2.54 mm (0.1 in)
         of rainfall for the given 14-day period.
 
@@ -402,6 +402,22 @@ class DateTest(object):
         else:
             return np.nanpercentile(a=self.Z, q=perc)
 
+    def plotKDEDistribution(self):
+        """Method to plot a histogram of the KDE densities.
+        """
+        if np.where(~np.isnan(self.Z))[0].size == 0:
+            self.kde()
+
+        fig = plt.figure(figsize=(8,6))
+        plt.hist(self.Z.ravel(), bins=np.arange(0, np.round(np.max(self.Z))+1, 1), density=True,
+                color='deepskyblue', ec='k')
+        plt.yticks(np.arange(0, 1.1, 0.1))
+        plt.xlabel('KDE Density', fontsize=13)
+        plt.ylabel('Relative Frequency', fontsize=13)
+        plt.title('Distribution of KDE Densities', fontsize=15)
+        plt.show(block=False)
+        return
+
     def makePlot(self, filled=True, **kwargs):
         """Method to make 3- or 4-panel plot based on instance attributes.
 
@@ -451,7 +467,7 @@ class DateTest(object):
                 cbar.set_label('mm')
             else:
                 im = m.contourf(x,y,contour,levels=[0,0.5,1],colors=['white','green'],latlon=True)
-                ax.set_title('(c) Exceeded 95th Percentile and had 5 Rainy Days')
+                ax.set_title('(c) Extreme Points')
 
         if np.where(~np.isnan(self.Z))[0].size != 0:
             ax = fig.add_subplot(224)
@@ -469,7 +485,7 @@ class DateTest(object):
                 self._im = m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
                 plt.clabel(self._im, fmt='%1.0f', fontsize='small')
 
-            ax.set_title('KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
+            ax.set_title('(d) KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
             self._levels = self._im.levels
         else:
             pass
