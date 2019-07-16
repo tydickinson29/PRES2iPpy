@@ -5,7 +5,9 @@ from matplotlib import cm, colors
 from mpl_toolkits.basemap import Basemap
 from sklearn.neighbors import KernelDensity
 import datetime
+import warnings
 #import time as t
+warnings.simplefilter("ignore")
 
 class DateTest(object):
     """Make plots of potential 14-day extreme precipitation events and
@@ -40,7 +42,7 @@ class DateTest(object):
     diff : array, shape (lat, lon)
         Difference between ``obs`` and ``model``. Filled after :func:`getObs` or :func:`plotExtremePoints` is called.
     daysOver2 : array, shape (lat, lon)
-        Number of days in the 14-day period that experienced at least 2.54 mm (1 in) of rainfall. Filled after :func:`plotRainyDays` or :func:`plotExtremePoints` is called.
+        Number of days in the 14-day period that experienced at least 1 mm (0.04 in) of rainfall. Filled after :func:`plotRainyDays` or :func:`plotExtremePoints` is called.
     totals3Day : array, shape (lat, lon)
         3-day rainfall total for the day of maximum precipitation and the two days surrounding for each point in space. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
     frac : array, shape (lat, lon)
@@ -162,13 +164,14 @@ class DateTest(object):
 
     def _checkDays(self, plot=False, **kwargs):
         """Helper method to calculate the number of days each grid point experienced
-        at least 2.54 mm (0.1 in) of rainfall for the given 14-day period.
+        at least 1 mm (0.04 in) of rainfall for the given 14-day period.
         """
+        print('Checking for rainy days')
         t,y,x = self.obs.shape
         obs = self.obs.reshape(t,y*x)
 
-        #find the number of times each column goes over 2.54 mm, then count the bins from 0 to the number of columns
-        self.daysOver2 = np.bincount(np.where(obs >= 2.54)[1], minlength=obs.shape[1])
+        #find the number of times each column goes over 1 mm, then count the bins from 0 to the number of columns
+        self.daysOver2 = np.bincount(np.where(obs >= 1)[1], minlength=obs.shape[1])
         self.daysOver2 = self.daysOver2.reshape(y,x)
         return
 
@@ -177,6 +180,7 @@ class DateTest(object):
         days surrounding it exceed 50% of the total rainfall received in the 14-day
         period.
         """
+        print('Checking 3-day totals around day of maximum')
         t,y,x = self.obs.shape
         obs = self.obs.reshape(t,y*x)
 
@@ -202,7 +206,7 @@ class DateTest(object):
         """Helper method to find which points are extreme.
 
         Points must have exceeded the 14-day 95th percentile, have experienced
-        at least 5 days of rainfall at or exceeding 2.54 mm (0.1 in), and had less
+        at least 5 days of rainfall at or exceeding 1 mm (0.04 in), and had less
         than 50% of the total rainfall fall in the day of maximum precipitation and
         the 2 surrounding days.
 
@@ -219,6 +223,52 @@ class DateTest(object):
             self._checkTotals()
 
         self.extreme = (self.diff >= 0) & (self.daysOver2 >= 5) & (self.frac <= 0.5)
+        return
+
+    def plotSlopes(self):
+        x,y = np.meshgrid(self.lon, self.lat)
+        cmap = cm.get_cmap('BrBG')
+        my_colors = [
+            cmap(1./20), #-1 to -0.9
+            cmap(2./20), #-0.9 to -0.8
+            cmap(3./20), #-0.8 to -0.7
+            cmap(4./20), #-0.7 to -0.6
+            cmap(5./20), #-0.6 to -0.5
+            cmap(6./20), #-0.5 to -0.4
+            cmap(7./20), #-0.4 to -0.3
+            cmap(8./20), #-0.3 to -0.2
+            cmap(9./20), #-0.2 to -0.1
+            'white', #-0.1 to 0
+            'white', #0 to 0.1
+            cmap(11./20), #0.1 to 0.2
+            cmap(12./20), #0.2 to 0.3
+            cmap(13./20), #0.3 to 0.4
+            cmap(14./20), #0.4 to 0.5
+            cmap(15./20), #0.5 to 0.6
+            cmap(16./20), #0.6 to 0.7
+            cmap(17./20), #0.7 to 0.8
+            cmap(18./20), #0.8 to 0.9
+            cmap(19./20) #0.9 to 1.0
+        ]
+        bounds = np.arange(-2,2.1,0.2)
+        my_cmap = colors.ListedColormap(my_colors)
+        my_cmap.set_under(cmap(0.0))
+        my_cmap.set_over(cmap(1.0))
+        norm = colors.BoundaryNorm(bounds, my_cmap.N)
+
+        fig = plt.figure(figsize=(8,6))
+        m = Basemap(projection='aea',resolution='l',
+            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+        m.drawcoastlines()
+        m.drawcountries()
+        m.drawstates()
+        loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
+        im = m.contourf(x,y,self.slope[loc,:,:], latlon=True, levels=bounds, cmap=my_cmap, norm=norm, extend='both')
+        cbar = m.colorbar(im, 'bottom')
+        cbar.set_label('mm/year')
+        plt.tight_layout()
+        plt.show(block=False)
         return
 
     def getObs(self):
@@ -251,7 +301,7 @@ class DateTest(object):
         return
 
     def plotRainyDays(self, **kwargs):
-        """Method to plot the number of days that experienced at least 2.54 mm (0.1 in)
+        """Method to plot the number of days that experienced at least 1 mm (0.04 in)
         of rainfall for the given 14-day period.
 
         Parameters
@@ -306,7 +356,7 @@ class DateTest(object):
         """Method to plot the points that are labeled as extreme. Extreme points are colored
         green while non-extreme points are colored white. A point is labeled as extreme if
         its 14-day total rainfall exceeded the 95th percentile, it experienced at least 5 days
-        of rainfall of at least 2.54 mm (0.1 in), and it did not have more than 50% of the total
+        of rainfall of at least 1 mm (0.04 in), and it did not have more than 50% of the total
         precipitation fall on the day of maximum rainfall and the surrounding 2 days.
         """
         if np.where(~np.isnan(self.extreme))[0].size == 0:
@@ -374,8 +424,11 @@ class DateTest(object):
 
         #convert from lat/lon to radians
         XtrainRad = Xtrain * np.pi / 180.
-        #grid evaluating KDE to (currently every third Livneh grid point; may change in future)
-        self.kdeGridX, self.kdeGridY = np.meshgrid(self.lon[::3], self.lat[::3])
+        #evaluate grid to a spacing of 0.1875 degrees (~18km) with ends far enough outside
+        #CONUS that contours will always close completely
+        gridLats = np.arange(24, 50.2, 0.1875)
+        gridLons = np.arange(232, 294.2, 0.1875)
+        self.kdeGridX, self.kdeGridY = np.meshgrid(gridLons, gridLats)
         xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
         xy *= np.pi / 180.
 
@@ -494,7 +547,7 @@ class DateTest(object):
         plt.show(block=False)
         return
 
-    def getAreas(self):
+    def calcAreas(self):
         """Method to calculate the area of the polygons in the KDE map shown by makePlot.
         The vertices are gathered from the objected returned by matplotlib's
         `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
@@ -519,7 +572,7 @@ class DateTest(object):
                 x = self._im.collections[i].get_paths()[j].vertices[:,0]
                 y = self._im.collections[i].get_paths()[j].vertices[:,1]
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
-                tmp.append(np.abs(a) / 1000.**2)
+                tmp.append(np.abs(a) / (1000.**2))
             tmp.sort()
             self.areas[self._levels[i]] = tmp
         return
