@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from mpl_toolkits.basemap import Basemap
 from sklearn.neighbors import KernelDensity
+from shapely.geometry import Polygon
+import pandas as pd
 import datetime
 import warnings
 #import time as t
@@ -34,7 +36,11 @@ class DateTest(object):
     slope : array, shape (lat, lon)
         Slopes of the quantile regression model.
     model : array, shape (lat, lon)
-        95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``
+        95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``.
+    kdeGridX : array, shape (261, 622)
+        Longitude grid the kernel density estimation is evaluated onto. Range is [128W, 66W] every 1/10th of a degree.
+    kdeGridY : array, shape (261, 622)
+        Latitude grid the kernel density estimation is evaluated onto. Range is [24N, 50N] every 1/10th of a degree.
     obs : array, shape (lat, lon)
         Recorded precipitation each day from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
     total : array, shape(lat, lon)
@@ -49,10 +55,6 @@ class DateTest(object):
         Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
     extreme : array, shape (lat, lon)
         True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`plotExtremePoints` is called.
-    kdeGridX : array, shape (lat/3, lon/3)
-        Longitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
-    kdeGridY : array, shape (lat/3, lon/3)
-        Latitude grid the kernel density estimation is evaluated onto. Filled after :func:`kde` is called.
     Z : array, shape (kdeGridX, kdeGridY)
         Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
     areas : dict
@@ -86,16 +88,19 @@ class DateTest(object):
         loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
         self.model = self.intercept[loc,:,:] + self.slope[loc,:,:]*self.year
 
+        gridLats = np.arange(24, 50.1, 0.1)
+        gridLons = np.arange(232, 294.1, 0.1)
+        self.kdeGridX, self.kdeGridY = np.meshgrid(gridLons, gridLats)
+
         self.obs = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.total = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.diff = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.daysOver2 = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.frac = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.extreme = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.kdeGridX = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
-        self.kdeGridY = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.Z = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
         self.areas = {}
+        self.polys = []
 
     def __repr__(self):
         return 'DateTest(month=%s, day=%s, year=%s)'%(self.month, self.day, self.year)
@@ -162,7 +167,7 @@ class DateTest(object):
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
 
-    def _checkDays(self, plot=False, **kwargs):
+    def _checkDays(self):
         """Helper method to calculate the number of days each grid point experienced
         at least 1 mm (0.04 in) of rainfall for the given 14-day period.
         """
@@ -202,18 +207,13 @@ class DateTest(object):
         self.frac = self.frac.reshape(y,x)
         return
 
-    def _getExtremePoints(self, plot=False):
+    def _getExtremePoints(self):
         """Helper method to find which points are extreme.
 
         Points must have exceeded the 14-day 95th percentile, have experienced
         at least 5 days of rainfall at or exceeding 1 mm (0.04 in), and had less
         than 50% of the total rainfall fall in the day of maximum precipitation and
         the 2 surrounding days.
-
-        Parameters
-        ----------
-        plot : boolean
-            If True, make and show a plot of the extreme points. Defaults to False.
         """
         if np.where(~np.isnan(self.diff))[0].size == 0:
             self.getObs()
@@ -336,7 +336,7 @@ class DateTest(object):
         **kwargs
             Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
         """
-        if np.where(~np.isnan(self.frac))[0].size != 0:
+        if np.where(~np.isnan(self.frac))[0].size == 0:
             self._checkTotals()
 
         x,y = np.meshgrid(self.lon,self.lat)
@@ -424,11 +424,6 @@ class DateTest(object):
 
         #convert from lat/lon to radians
         XtrainRad = Xtrain * np.pi / 180.
-        #evaluate grid to a spacing of 0.1875 degrees (~18km) with ends far enough outside
-        #CONUS that contours will always close completely
-        gridLats = np.arange(24, 50.2, 0.1875)
-        gridLons = np.arange(232, 294.2, 0.1875)
-        self.kdeGridX, self.kdeGridY = np.meshgrid(gridLons, gridLats)
         xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
         xy *= np.pi / 180.
 
@@ -452,6 +447,7 @@ class DateTest(object):
         """
         if np.where(~np.isnan(self.Z))[0].size == 0:
             self.kde()
+            return np.nanpercentile(a=self.Z, q=perc)
         else:
             return np.nanpercentile(a=self.Z, q=perc)
 
@@ -524,6 +520,7 @@ class DateTest(object):
 
         if np.where(~np.isnan(self.Z))[0].size != 0:
             ax = fig.add_subplot(224)
+            #making the Basemap object a private attribute to be used in _makeDataframe()
             m = Basemap(projection='aea',resolution='l',
                 llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
                 lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
@@ -531,15 +528,14 @@ class DateTest(object):
             m.drawcountries()
             m.drawstates()
             if filled:
-                self._im = m.contourf(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
-                cbar = m.colorbar(self._im,'bottom')
+                im = m.contourf(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
+                cbar = m.colorbar(im,'bottom')
                 cbar.set_label('Density')
             else:
-                self._im = m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
-                plt.clabel(self._im, fmt='%1.0f', fontsize='small')
+                im = m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
+                #plt.clabel(self._im, fmt='%1.0f', fontsize='small')
 
             ax.set_title('(d) KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
-            self._levels = self._im.levels
         else:
             pass
 
@@ -547,32 +543,68 @@ class DateTest(object):
         plt.show(block=False)
         return
 
+    def getContours(self):
+        self._m = Basemap(projection='aea',resolution='l',
+            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+        self._im = self._m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, levels=[self.calcKDEPercentile()])
+        self._levels = self._im.levels
+        return
+
     def calcAreas(self):
         """Method to calculate the area of the polygons in the KDE map shown by makePlot.
         The vertices are gathered from the objected returned by matplotlib's
         `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
-        method and the area is calculated using Green's Theorem. Requires the makePlot method
+        method and the area is calculated using Green's Theorem. Requires the :func:`makePlot` method
         to have been called since it requires vertices to describe the polygon that we are
         finding the area of!
 
         Areas for each contour are stored in a dictionary and assigned as an instance attribute
-        and have units of squared kilometers.
+        with units of squared kilometers.
         """
         try:
             getattr(self, '_im')
         except AttributeError:
-            self.kde()
-            self.makePlot()
+            if np.where(~np.isnan(self.Z))[0].size == 0:
+                self.kde()
+            self.getContours()
 
         numContours = len(self._im.collections)
         self.areas = {}
+        self.polys = []
         for i in range(numContours):
-            tmp = []
-            for j in range(len(self._im.collections[i].get_paths())):
-                x = self._im.collections[i].get_paths()[j].vertices[:,0]
-                y = self._im.collections[i].get_paths()[j].vertices[:,1]
+            areas = []
+            for region in self._im.collections[i].get_paths():
+                x = region.vertices[:,0]
+                y = region.vertices[:,1]
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
-                tmp.append(np.abs(a) / (1000.**2))
-            tmp.sort()
-            self.areas[self._levels[i]] = tmp
+                a = np.abs(a) / (1000.**2)
+                areas.append(a)
+                if a >= 100000.:
+                    lons, lats = self._m(x, y, inverse=True)
+                    self.polys.append(Polygon([(j[0], j[1]) for j in zip(lons,lats)]))
+            #areas.sort()
+            self.areas[self._levels[i]] = areas
+            if len(self.polys) != 0:
+                self._makeDataframe()
+        return
+
+    def _makeDataframe(self):
+        #FIXME: Will likely be moved into another file to be used in reference
+        #to individual objects (i.e., dates)
+        print("Creating file")
+        begin = ['%s/%s/%s'%(self.month, self.day, self.year)]*len(self.polys)
+        end = ['%s/%s/%s'%(self.DATE_END.month,self.DATE_END.day,self.DATE_END.year)]*len(self.polys)
+
+        minx = [i.bounds[0] for i in self.polys]
+        miny = [i.bounds[1] for i in self.polys]
+        maxx = [i.bounds[2] for i in self.polys]
+        maxy = [i.bounds[3] for i in self.polys]
+
+        #self.df = pd.DataFrame({'Begin_Date':begin, 'End_Date':end, 'Polygons':self.polys,
+        #                        'Min_Lon':minx, 'Min_Lat':miny, 'Max_Lon':maxx, 'Max_Lat':maxy})
+        self.df = pd.DataFrame({'Begin_Date':begin, 'End_Date':end, 'Area':self.areas[self.areas.keys()[0]]
+                                'Min_Lon':minx, 'Min_Lat':miny, 'Max_Lon':maxx, 'Max_Lat':maxy})
+        self.df = self.df.astype({'Begin_Date':'datetime64', 'End_Date':'datetime64'})
+        self.df.to_csv('database.csv')
         return
