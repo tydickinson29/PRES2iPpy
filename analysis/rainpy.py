@@ -1,8 +1,7 @@
 import numpy as np
 from netCDF4 import Dataset,num2date
 import matplotlib.pyplot as plt
-from matplotlib import cm, colors
-from mpl_toolkits.basemap import Basemap
+from matplotlib import colors
 from sklearn.neighbors import KernelDensity
 from shapely.geometry import Polygon
 import pandas as pd
@@ -10,6 +9,7 @@ import datetime
 import warnings
 #import time as t
 warnings.simplefilter("ignore")
+import cartopy.crs as ccrs
 
 class DateTest(object):
     """Make plots of potential 14-day extreme precipitation events and
@@ -61,6 +61,7 @@ class DateTest(object):
         Areas of KDE (:func:`kde`) contours drawn in :func:`makePlot` in square kilometers. Filled after :func:`getAreas` is called.
     """
 
+
     with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
         lat = nc.variables['lat'][:]
         lon = nc.variables['lon'][:]
@@ -78,6 +79,7 @@ class DateTest(object):
                     '4':['April',30], '5':['May',31], '6':['June',30],
                     '7':['July',31], '8':['August',31], '9':['September',30],
                     '10':['October',31], '11':['November',30], '12':['December',31]}
+
 
     def __init__(self,month,day,year):
         #init called first
@@ -167,11 +169,40 @@ class DateTest(object):
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
 
-    def _checkDays(self):
+    def getObs(self):
+        """Method to retrive Livneh reanalyses from the year specified by the object.
+
+        Creates the observations and difference attributes for the instance. Observations
+        are from Livneh and the difference is the observation amounts minus the amount given
+        by the quantile regression model. Furthermore, the differences are specified to be 1
+        if the rainfall was greater than the extreme threshold and 0 if less than the extreme
+        threshold.
+        """
+        with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.year)+'.nc','r') as nc:
+            #print('Getting observations from %s'%self.year)
+            time = nc.variables['time'][:]
+            timeUnits = nc.variables['time'].units
+            timeCalendar = nc.variables['time'].calendar
+            time = num2date(time,timeUnits,timeCalendar)
+            month = np.array([d.month for d in time])
+            day = np.array([d.day for d in time])
+            self.obs = nc.variables['prec'][:]
+            if self.DATE_BEGIN.month == self.DATE_END.month:
+                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+            else:
+                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+
+            self.obs = self.obs[locs,:,:]
+            self.obs = self.obs.filled(np.nan)
+            self.total = np.sum(self.obs,axis=0)
+            self.diff = self.total - self.model
+        return
+
+    def checkRainyDays(self):
         """Helper method to calculate the number of days each grid point experienced
         at least 1 mm (0.04 in) of rainfall for the given 14-day period.
         """
-        print('Checking for rainy days')
+        #print('Checking for rainy days')
         t,y,x = self.obs.shape
         obs = self.obs.reshape(t,y*x)
 
@@ -180,12 +211,12 @@ class DateTest(object):
         self.daysOver2 = self.daysOver2.reshape(y,x)
         return
 
-    def _checkTotals(self):
+    def check3DayTotals(self):
         """Helper method to check if the day with the maximum precipitation and the two
         days surrounding it exceed 50% of the total rainfall received in the 14-day
         period.
         """
-        print('Checking 3-day totals around day of maximum')
+        #print('Checking 3-day totals around day of maximum')
         t,y,x = self.obs.shape
         obs = self.obs.reshape(t,y*x)
 
@@ -207,7 +238,7 @@ class DateTest(object):
         self.frac = self.frac.reshape(y,x)
         return
 
-    def _getExtremePoints(self):
+    def getExtremePoints(self):
         """Helper method to find which points are extreme.
 
         Points must have exceeded the 14-day 95th percentile, have experienced
@@ -218,162 +249,11 @@ class DateTest(object):
         if np.where(~np.isnan(self.diff))[0].size == 0:
             self.getObs()
         if np.where(~np.isnan(self.daysOver2))[0].size == 0:
-            self._checkDays()
+            self.checkRainyDays()
         if np.where(~np.isnan(self.frac))[0].size == 0:
-            self._checkTotals()
+            self.check3DayTotals()
 
         self.extreme = (self.diff >= 0) & (self.daysOver2 >= 5) & (self.frac <= 0.5)
-        return
-
-    def plotSlopes(self):
-        x,y = np.meshgrid(self.lon, self.lat)
-        cmap = cm.get_cmap('BrBG')
-        my_colors = [
-            cmap(1./20), #-1 to -0.9
-            cmap(2./20), #-0.9 to -0.8
-            cmap(3./20), #-0.8 to -0.7
-            cmap(4./20), #-0.7 to -0.6
-            cmap(5./20), #-0.6 to -0.5
-            cmap(6./20), #-0.5 to -0.4
-            cmap(7./20), #-0.4 to -0.3
-            cmap(8./20), #-0.3 to -0.2
-            cmap(9./20), #-0.2 to -0.1
-            'white', #-0.1 to 0
-            'white', #0 to 0.1
-            cmap(11./20), #0.1 to 0.2
-            cmap(12./20), #0.2 to 0.3
-            cmap(13./20), #0.3 to 0.4
-            cmap(14./20), #0.4 to 0.5
-            cmap(15./20), #0.5 to 0.6
-            cmap(16./20), #0.6 to 0.7
-            cmap(17./20), #0.7 to 0.8
-            cmap(18./20), #0.8 to 0.9
-            cmap(19./20) #0.9 to 1.0
-        ]
-        bounds = np.arange(-2,2.1,0.2)
-        my_cmap = colors.ListedColormap(my_colors)
-        my_cmap.set_under(cmap(0.0))
-        my_cmap.set_over(cmap(1.0))
-        norm = colors.BoundaryNorm(bounds, my_cmap.N)
-
-        fig = plt.figure(figsize=(8,6))
-        m = Basemap(projection='aea',resolution='l',
-            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-        m.drawcoastlines()
-        m.drawcountries()
-        m.drawstates()
-        loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
-        im = m.contourf(x,y,self.slope[loc,:,:], latlon=True, levels=bounds, cmap=my_cmap, norm=norm, extend='both')
-        cbar = m.colorbar(im, 'bottom')
-        cbar.set_label('mm/year')
-        plt.tight_layout()
-        plt.show(block=False)
-        return
-
-    def getObs(self):
-        """Method to retrive Livneh reanalyses from the year specified by the object.
-
-        Creates the observations and difference attributes for the instance. Observations
-        are from Livneh and the difference is the observation amounts minus the amount given
-        by the quantile regression model. Furthermore, the differences are specified to be 1
-        if the rainfall was greater than the extreme threshold and 0 if less than the extreme
-        threshold.
-        """
-        with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.year)+'.nc','r') as nc:
-            print('Getting observations from %s'%self.year)
-            time = nc.variables['time'][:]
-            timeUnits = nc.variables['time'].units
-            timeCalendar = nc.variables['time'].calendar
-            time = num2date(time,timeUnits,timeCalendar)
-            month = np.array([d.month for d in time])
-            day = np.array([d.day for d in time])
-            self.obs = nc.variables['prec'][:]
-            if self.DATE_BEGIN.month == self.DATE_END.month:
-                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-            else:
-                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-
-            self.obs = self.obs[locs,:,:]
-            self.obs = self.obs.filled(np.nan)
-            self.total = np.sum(self.obs,axis=0)
-            self.diff = self.total - self.model
-        return
-
-    def plotRainyDays(self, **kwargs):
-        """Method to plot the number of days that experienced at least 1 mm (0.04 in)
-        of rainfall for the given 14-day period.
-
-        Parameters
-        ----------
-        **kwargs
-            Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
-        """
-        if np.where(~np.isnan(self.daysOver2))[0].size == 0:
-            self._checkDays()
-
-        x,y = np.meshgrid(self.lon,self.lat)
-        fig = plt.figure(figsize=(8,6))
-        m = Basemap(projection='aea',resolution='l',
-            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-        m.drawcoastlines()
-        m.drawcountries()
-        m.drawstates()
-        im = m.contourf(x, y, self.daysOver2, latlon=True, **kwargs)
-        m.colorbar(im, 'bottom')
-        plt.tight_layout()
-        plt.show(block=False)
-
-    def plot3DayTotals(self, **kwargs):
-        """Method to plot the fraction of rainfall that fell on the day of maximum
-        precipitation and the two days surrounding. Uses the first 3 days if the day
-        of the maximum was day 1 of the event; uses the last 3 days if the day of the
-        maximum was day 14 of the event.
-
-        Parameters
-        ----------
-        **kwargs
-            Additional keyword arguments accepted by matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
-        """
-        if np.where(~np.isnan(self.frac))[0].size == 0:
-            self._checkTotals()
-
-        x,y = np.meshgrid(self.lon,self.lat)
-        fig = plt.figure(figsize=(8,6))
-        m = Basemap(projection='aea',resolution='l',
-            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-        m.drawcoastlines()
-        m.drawcountries()
-        m.drawstates()
-        im = m.contourf(x, y, self.frac, latlon=True, **kwargs)
-        m.colorbar(im, 'bottom')
-        plt.tight_layout()
-        plt.show(block=False)
-
-    def plotExtremePoints(self):
-        """Method to plot the points that are labeled as extreme. Extreme points are colored
-        green while non-extreme points are colored white. A point is labeled as extreme if
-        its 14-day total rainfall exceeded the 95th percentile, it experienced at least 5 days
-        of rainfall of at least 1 mm (0.04 in), and it did not have more than 50% of the total
-        precipitation fall on the day of maximum rainfall and the surrounding 2 days.
-        """
-        if np.where(~np.isnan(self.extreme))[0].size == 0:
-            self._getExtremePoints()
-
-        x,y = np.meshgrid(self.lon,self.lat)
-        fig = plt.figure(figsize=(8,6))
-        m = Basemap(projection='aea',resolution='l',
-            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-        m.drawcoastlines()
-        m.drawcountries()
-        m.drawstates()
-        im = m.contourf(x, y, self.extreme, latlon=True, levels=[0,0.5,1], colors=['white','green'])
-        m.colorbar(im, 'bottom')
-        plt.tight_layout()
-        plt.show(block=False)
         return
 
     def kde(self, weighted=False, **kwargs):
@@ -403,7 +283,7 @@ class DateTest(object):
             weighted = None
 
         if np.where(~np.isnan(self.extreme))[0].size == 0:
-            self._getExtremePoints()
+            self.getExtremePoints()
 
         x,y = np.meshgrid(self.lon, self.lat)
         locs = np.ma.where(self.extreme == 1)
@@ -447,9 +327,7 @@ class DateTest(object):
         """
         if np.where(~np.isnan(self.Z))[0].size == 0:
             self.kde()
-            return np.nanpercentile(a=self.Z, q=perc)
-        else:
-            return np.nanpercentile(a=self.Z, q=perc)
+        return np.nanpercentile(a=self.Z, q=perc)
 
     def plotKDEDistribution(self):
         """Method to plot a histogram of the KDE densities.
@@ -467,87 +345,11 @@ class DateTest(object):
         plt.show(block=False)
         return
 
-    def makePlot(self, filled=True, **kwargs):
-        """Method to make 3- or 4-panel plot based on instance attributes.
-
-        Top left panel will always be the rainfall given by the Livneh dataset.
-        Top right panel will always be the thresholds for extreme given by the quantile
-        regression model. Bottom left panel will always be the difference, with green shading
-        where there was extreme rainfall and white otherwise. Bottom right panel is an optional panel,
-        being the KDE smoothed map.
-
-        Parameters
-        ----------
-        filled : boolean
-            If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
-        **kwargs
-            Additional keyword arguments accepted by matplotlib's `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
-            method and matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ method.
-        """
-
-        x,y = np.meshgrid(self.lon,self.lat)
-        boundsPrecip = np.linspace(0,600,17)
-        colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
-                'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
-        cmapPrecip = colors.ListedColormap(colorsPrecip)
-        cmapPrecip.set_over('gainsboro')
-        normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
-
-        fig = plt.figure(figsize=(13,10))
-        for plot_num, contour in enumerate([self.total,self.model,self.extreme]):
-            ax = fig.add_subplot(int('22'+str(plot_num+1)))
-            m = Basemap(projection='aea',resolution='l',
-                llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-                lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-            m.drawcoastlines()
-            m.drawcountries()
-            m.drawstates()
-            if (plot_num == 0):
-                im = m.contourf(x,y,contour,levels=boundsPrecip,cmap=cmapPrecip,norm=normPrecip,extend='max',latlon=True)
-                ax.set_title('(a) %s/%s/%s - %s/%s/%s Observed Precipitation'
-                    %(self.DATE_BEGIN.month,self.DATE_BEGIN.day,self.DATE_BEGIN.year,self.DATE_END.month,self.DATE_END.day,self.DATE_END.year))
-                cbar = m.colorbar(im,'bottom')
-                cbar.set_label('mm')
-            elif (plot_num == 1):
-                im = m.contourf(x,y,contour,levels=boundsPrecip,cmap=cmapPrecip,norm=normPrecip,extend='max',latlon=True)
-                ax.set_title('(b) %s/%s/%s - %s/%s/%s 95th Percentile'
-                    %(self.DATE_BEGIN.month,self.DATE_BEGIN.day,self.DATE_BEGIN.year,self.DATE_END.month,self.DATE_END.day,self.DATE_END.year))
-                cbar = m.colorbar(im,'bottom')
-                cbar.set_label('mm')
-            else:
-                im = m.contourf(x,y,contour,levels=[0,0.5,1],colors=['white','green'],latlon=True)
-                ax.set_title('(c) Extreme Points')
-
-        if np.where(~np.isnan(self.Z))[0].size != 0:
-            ax = fig.add_subplot(224)
-            #making the Basemap object a private attribute to be used in _makeDataframe()
-            m = Basemap(projection='aea',resolution='l',
-                llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-                lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-            m.drawcoastlines()
-            m.drawcountries()
-            m.drawstates()
-            if filled:
-                im = m.contourf(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
-                cbar = m.colorbar(im,'bottom')
-                cbar.set_label('Density')
-            else:
-                im = m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, **kwargs)
-                #plt.clabel(self._im, fmt='%1.0f', fontsize='small')
-
-            ax.set_title('(d) KDE with %s Kernel and %s Bandwidth'%(self.kde.kernel.capitalize(), self.kde.bandwidth))
-        else:
-            pass
-
-        plt.tight_layout()
-        plt.show(block=False)
-        return
-
     def getContours(self):
-        self._m = Basemap(projection='aea',resolution='l',
-            llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
-            lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
-        self._im = self._m.contour(self.kdeGridX, self.kdeGridY, self.Z, latlon=True, levels=[self.calcKDEPercentile()])
+        ax = plt.axes(projection=ccrs.AlbersEqualArea(central_latitude=35, central_longitude=250))
+        ax.set_extent([232,294,24,50])
+        self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.Z, levels=[self.calcKDEPercentile()],
+                            transform=ccrs.AlbersEqualArea)
         self._levels = self._im.levels
         return
 
@@ -571,7 +373,7 @@ class DateTest(object):
 
         numContours = len(self._im.collections)
         self.areas = {}
-        self.polys = []
+        #self.polys = []
         for i in range(numContours):
             areas = []
             for region in self._im.collections[i].get_paths():
@@ -580,31 +382,8 @@ class DateTest(object):
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
                 a = np.abs(a) / (1000.**2)
                 areas.append(a)
-                if a >= 100000.:
-                    lons, lats = self._m(x, y, inverse=True)
-                    self.polys.append(Polygon([(j[0], j[1]) for j in zip(lons,lats)]))
-            #areas.sort()
+                #if a >= 100000.:
+                    #lons, lats = self._m(x, y, inverse=True)
+                    #self.polys.append(Polygon([(j[0], j[1]) for j in zip(lons,lats)]))
             self.areas[self._levels[i]] = areas
-            if len(self.polys) != 0:
-                self._makeDataframe()
-        return
-
-    def _makeDataframe(self):
-        #FIXME: Will likely be moved into another file to be used in reference
-        #to individual objects (i.e., dates)
-        print("Creating file")
-        begin = ['%s/%s/%s'%(self.month, self.day, self.year)]*len(self.polys)
-        end = ['%s/%s/%s'%(self.DATE_END.month,self.DATE_END.day,self.DATE_END.year)]*len(self.polys)
-
-        minx = [i.bounds[0] for i in self.polys]
-        miny = [i.bounds[1] for i in self.polys]
-        maxx = [i.bounds[2] for i in self.polys]
-        maxy = [i.bounds[3] for i in self.polys]
-
-        #self.df = pd.DataFrame({'Begin_Date':begin, 'End_Date':end, 'Polygons':self.polys,
-        #                        'Min_Lon':minx, 'Min_Lat':miny, 'Max_Lon':maxx, 'Max_Lat':maxy})
-        self.df = pd.DataFrame({'Begin_Date':begin, 'End_Date':end, 'Area':self.areas[self.areas.keys()[0]]
-                                'Min_Lon':minx, 'Min_Lat':miny, 'Max_Lon':maxx, 'Max_Lat':maxy})
-        self.df = self.df.astype({'Begin_Date':'datetime64', 'End_Date':'datetime64'})
-        self.df.to_csv('database.csv')
         return
