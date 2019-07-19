@@ -1,1 +1,1 @@
-__all__ = ['generateDatabase', 'rainpy']
+__all__ = ['generateDatabase', 'rainpy', 'plotting']
