@@ -9,7 +9,6 @@ import datetime
 import warnings
 #import time as t
 warnings.simplefilter("ignore")
-import cartopy.crs as ccrs
 
 class DateTest(object):
     """Make plots of potential 14-day extreme precipitation events and
@@ -46,21 +45,20 @@ class DateTest(object):
     total : array, shape(lat, lon)
         Total precipitation from the Livneh dataset (i.e., sum at each grid point of ``obs``). Filled after :func:`getObs` is called.
     diff : array, shape (lat, lon)
-        Difference between ``obs`` and ``model``. Filled after :func:`getObs` or :func:`plotExtremePoints` is called.
+        Difference between ``obs`` and ``model``. Filled after :func:`getObs` is called.
     daysOver2 : array, shape (lat, lon)
-        Number of days in the 14-day period that experienced at least 1 mm (0.04 in) of rainfall. Filled after :func:`plotRainyDays` or :func:`plotExtremePoints` is called.
+        Number of days in the 14-day period that experienced at least 1 mm (0.04 in) of rainfall. Filled after :func:`checkRainyDays` is called.
     totals3Day : array, shape (lat, lon)
-        3-day rainfall total for the day of maximum precipitation and the two days surrounding for each point in space. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
+        3-day rainfall total for the day of maximum precipitation and the two days surrounding for each point in space. Filled after :func:`check3DayTotals` is called.
     frac : array, shape (lat, lon)
-        Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`plot3DayTotals` or :func:`plotExtremePoints` is called.
+        Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`check3DayTotals` is called.
     extreme : array, shape (lat, lon)
-        True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`plotExtremePoints` is called.
+        True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`getExtremePoints` is called.
     Z : array, shape (kdeGridX, kdeGridY)
         Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
     areas : dict
-        Areas of KDE (:func:`kde`) contours drawn in :func:`makePlot` in square kilometers. Filled after :func:`getAreas` is called.
+        Areas of KDE (:func:`kde`) contours drawn in square kilometers. Filled after :func:`getAreas` is called.
     """
-
 
     with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
         lat = nc.variables['lat'][:]
@@ -170,7 +168,7 @@ class DateTest(object):
         return self.DATE_BEGIN + datetime.timedelta(days=13)
 
     def getObs(self):
-        """Method to retrive Livneh reanalyses from the year specified by the object.
+        """Retrive Livneh reanalyses from the year specified by the object.
 
         Creates the observations and difference attributes for the instance. Observations
         are from Livneh and the difference is the observation amounts minus the amount given
@@ -199,7 +197,7 @@ class DateTest(object):
         return
 
     def checkRainyDays(self):
-        """Helper method to calculate the number of days each grid point experienced
+        """Calculate the number of days each grid point experienced
         at least 1 mm (0.04 in) of rainfall for the given 14-day period.
         """
         #print('Checking for rainy days')
@@ -212,7 +210,7 @@ class DateTest(object):
         return
 
     def check3DayTotals(self):
-        """Helper method to check if the day with the maximum precipitation and the two
+        """Check if the day with the maximum precipitation and the two
         days surrounding it exceed 50% of the total rainfall received in the 14-day
         period.
         """
@@ -239,7 +237,7 @@ class DateTest(object):
         return
 
     def getExtremePoints(self):
-        """Helper method to find which points are extreme.
+        """Find which points are extreme.
 
         Points must have exceeded the 14-day 95th percentile, have experienced
         at least 5 days of rainfall at or exceeding 1 mm (0.04 in), and had less
@@ -257,7 +255,7 @@ class DateTest(object):
         return
 
     def kde(self, weighted=False, **kwargs):
-        """Method to calculate the kernel density estimate for a given period.
+        """Calculate the kernel density estimate for a given period.
 
         Additional keyword arguments are accepted to customize the KernelDensity class.
         Every third Livneh grid point is used; thus, the KDE grid is every 3/16 of a
@@ -318,7 +316,7 @@ class DateTest(object):
         return
 
     def calcKDEPercentile(self, perc=95):
-        """Method to return a KDE density for a given percentile.
+        """Return a KDE density for a given percentile.
 
         Parameters
         ----------
@@ -329,23 +327,13 @@ class DateTest(object):
             self.kde()
         return np.nanpercentile(a=self.Z, q=perc)
 
-    def plotKDEDistribution(self):
-        """Method to plot a histogram of the KDE densities.
-        """
-        if np.where(~np.isnan(self.Z))[0].size == 0:
-            self.kde()
-
-        fig = plt.figure(figsize=(8,6))
-        plt.hist(self.Z.ravel(), bins=np.arange(0, np.round(np.max(self.Z))+1, 1), density=True,
-                color='deepskyblue', ec='k')
-        plt.yticks(np.arange(0, 1.1, 0.1))
-        plt.xlabel('KDE Density', fontsize=13)
-        plt.ylabel('Relative Frequency', fontsize=13)
-        plt.title('Distribution of KDE Densities', fontsize=15)
-        plt.show(block=False)
-        return
-
     def getContours(self):
+        """Method to draw contour for extreme region.
+
+        Utilizing ``cartopy`` to setup Albers Equal Area projection since ``Basemap``
+        is not installed in the environment being used to make shapefile.
+        """
+        import cartopy.crs as ccrs
         ax = plt.axes(projection=ccrs.AlbersEqualArea(central_latitude=35, central_longitude=250))
         ax.set_extent([232,294,24,50])
         self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.Z, levels=[self.calcKDEPercentile()],
@@ -354,10 +342,11 @@ class DateTest(object):
         return
 
     def calcAreas(self):
-        """Method to calculate the area of the polygons in the KDE map shown by makePlot.
+        """Calculate the area of the polygons in the KDE map shown by :func:`getContours`.
+
         The vertices are gathered from the objected returned by matplotlib's
         `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
-        method and the area is calculated using Green's Theorem. Requires the :func:`makePlot` method
+        method and the area is calculated using Green's Theorem. Requires the :func:`getContours` method
         to have been called since it requires vertices to describe the polygon that we are
         finding the area of!
 

@@ -4,7 +4,7 @@ from matplotlib import colors
 from mpl_toolkits.basemap import Basemap
 
 def plotSlopes(obj):
-    """Function to plot the slope of the quantile regression model for the
+    """Plot the slope of the quantile regression model for the
     input 14-day period.
 
     Parameters
@@ -58,8 +58,8 @@ def plotSlopes(obj):
     return
 
 def plotRainyDays(obj, **kwargs):
-    """Function to plot the number of days that experienced at least 1 mm (0.04 in)
-    of rainfall for the given 14-day period.
+    """Plot the number of days that experienced at least 1 mm (0.04 in) of rainfall
+    for the given 14-day period.
 
     Parameters
     ----------
@@ -86,10 +86,11 @@ def plotRainyDays(obj, **kwargs):
     return
 
 def plot3DayTotals(obj, **kwargs):
-    """Function to plot the fraction of rainfall that fell on the day of maximum
-    precipitation and the two days surrounding. Uses the first 3 days if the day
-    of the maximum was day 1 of the event; uses the last 3 days if the day of the
-    maximum was day 14 of the event.
+    """Plot the fraction of rainfall that fell on the day of maximum precipitation
+    and the two days surrounding.
+
+    Uses the first 3 days if the day of the maximum was day 1 of the event; uses
+    the last 3 days if the day of the maximum was day 14 of the event.
 
     Parameters
     ----------
@@ -116,11 +117,13 @@ def plot3DayTotals(obj, **kwargs):
     return
 
 def plotExtremePoints(obj):
-    """Function to plot the points that are labeled as extreme. Extreme points are colored
-    green while non-extreme points are colored white. A point is labeled as extreme if
-    its 14-day total rainfall exceeded the 95th percentile, it experienced at least 5 days
-    of rainfall of at least 1 mm (0.04 in), and it did not have more than 50% of the total
-    precipitation fall on the day of maximum rainfall and the surrounding 2 days.
+    """Plot the points that are labeled as extreme.
+
+    Extreme points are colored green while non-extreme points are colored white.
+    A point is labeled as extreme if its 14-day total rainfall exceeded the 95th
+    percentile, it experienced at least 5 days of rainfall of at least 1 mm (0.04 in),
+    and it did not have more than 50% of the total precipitation fall on the day
+    of maximum rainfall and the surrounding 2 days.
 
     Parameters
     ----------
@@ -145,7 +148,7 @@ def plotExtremePoints(obj):
     return
 
 def makePlot(obj, filled=True, **kwargs):
-    """Function to make 3- or 4-panel plot based on instance attributes.
+    """Make 3- or 4-panel plot based on instance attributes.
 
     Top left panel will always be the rainfall given by the Livneh dataset.
     Top right panel will always be the thresholds for extreme given by the quantile
@@ -219,5 +222,21 @@ def makePlot(obj, filled=True, **kwargs):
         pass
 
     plt.tight_layout()
+    plt.show(block=False)
+    return
+
+def plotKDEDistribution(obj):
+    """Plot a histogram of the KDE densities.
+    """
+    if np.where(~np.isnan(obj.Z))[0].size == 0:
+        obj.kde()
+
+    fig = plt.figure(figsize=(8,6))
+    plt.hist(obj.Z.ravel(), bins=np.arange(0, np.round(np.max(obj.Z))+1, 1), density=True,
+            color='deepskyblue', ec='k')
+    plt.yticks(np.arange(0, 1.1, 0.1))
+    plt.xlabel('KDE Density', fontsize=13)
+    plt.ylabel('Relative Frequency', fontsize=13)
+    plt.title('Distribution of KDE Densities', fontsize=15)
     plt.show(block=False)
     return
