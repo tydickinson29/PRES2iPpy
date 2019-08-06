@@ -21,7 +21,7 @@ def loadData(BEGINDATE, length):
 
     #Livneh runs from 1915 through 2011 so 97 years unless considering December 19 through December 31
     #since it runs into next year, so I must ignore the Jan. 1915 days and Dec. 2011 days
-    totalYears = 97 if (BEGINDATE.month <= 12) and (BEGINDATE.day <= 18) else 96
+    totalYears = 96 if (BEGINDATE.month == 12) and (BEGINDATE.day >= 19) else 97
 
     path = '/home/tdickinson/data/Livneh/'
     files = os.listdir(path)
@@ -66,7 +66,7 @@ def loadData(BEGINDATE, length):
     precip = precip.reshape(t,y*x)
     nonNaN = np.where(~np.isnan(precip[0,:]))[0]
     years = sm.add_constant(np.arange(1915, 1915+totalYears, 1))
-    
+
     return precip[:,nonNaN], precip.shape[1], nonNaN, years
 
 def main():
@@ -114,12 +114,10 @@ def main():
 
     if rank == 0:
         precip, totalGrids, nonNaN, years = loadData(BEGINDATE_STR, LENGTH)
-        print('Rank %s: %s \n'%(rank,years))
         precip = np.array_split(precip,size,axis=1)
 
     data = comm.scatter(precip, root=0)
     years = comm.bcast(years, root=0)
-    print('Rank %s: %s \n'%(rank,years))
     numOfSlopes = data.shape[1]
 
     slopes = np.zeros((numOfSlopes,))*np.nan
