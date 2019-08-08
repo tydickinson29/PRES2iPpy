@@ -34,7 +34,6 @@ def loadData(BEGINDATE, length):
     except: timeCalendar = 'standard'
 
     times = num2date(times,timeUnits,timeCalendar)
-    years = np.array([d.year for d in times])
     months = np.array([d.month for d in times])
     days = np.array([d.day for d in times])
 
