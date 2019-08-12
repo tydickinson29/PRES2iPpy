@@ -21,10 +21,12 @@ def loadData(BEGINDATE, length):
 
     #Livneh runs from 1915 through 2011 so 97 years unless considering December 19 through December 31
     #since it runs into next year, so I must ignore the Jan. 1915 days and Dec. 2011 days
+    #FIXME: adjust day to be compatible for any input length (currently hard coded for 14 day length)
     totalYears = 96 if (BEGINDATE.month == 12) and (BEGINDATE.day >= 19) else 97
 
     path = '/home/tdickinson/data/Livneh/'
     files = os.listdir(path)
+    files.sort()
     files = [path+i for i in files]
 
     nc = MFDataset(files,'r')
@@ -43,7 +45,7 @@ def loadData(BEGINDATE, length):
         locs = np.where(((months==BEGINDATE.month)&(days>=BEGINDATE.day)) | ((months==ENDDATE.month)&(days<=ENDDATE.day)))[0]
 
     #check to ensure the correct number of days (i.e., remove leap days or beginning January days in late December start)
-    while locs.size != 14*totalYears:
+    if locs.size != 14*totalYears:
         if BEGINDATE.month == 2:
             leapDay = np.where((months==2)&(days==29))[0]
             badLocs = [np.where(locs==i)[0][0] for i in leapDay]
@@ -60,7 +62,7 @@ def loadData(BEGINDATE, length):
     nc.close()
     #get 14-day sum for each year
     t,y,x = precip.shape
-    precip = np.sum(precip.reshape(totalYears, t/totalYears, y, x), axis=1)
+    precip = np.sum(precip.reshape(totalYears, length, y, x), axis=1)
     t,y,x = precip.shape
     precip = precip.reshape(t,y*x)
     nonNaN = np.where(~np.isnan(precip[0,:]))[0]
@@ -72,32 +74,22 @@ def main():
     #unpack command line arguments from user
     parser = argparse.ArgumentParser()
     parser.add_argument("-q", "--quantile", type=float, help="quantile for regression model")
-    parser.add_argument("-p", "--percentile", type=float, help="percentile for regression model. Will be converted to a decimal in [0,1]")
     parser.add_argument("-b", "--begin", type=str, help="begin date for window")
     parser.add_argument("-l", "--length", type=int, help="length of window")
     args = parser.parse_args()
 
     qUser = args.quantile
-    pUser = args.percentile
     BEGINDATE_STR = args.begin
     LENGTH = args.length
+
+    if qUser is None:
+        raise InputError('No quantile to fit model was input.')
 
     if LENGTH is None:
         raise InputError('No window length was input.')
 
     if BEGINDATE_STR is None:
         raise InputError('No beginning date was input.')
-
-    if pUser is not None:
-        pUser /= 100
-
-    if (qUser is None) and (pUser is None):
-        raise InputError('Neither the desired quantile or percentile were entered.')
-    elif (qUser != pUser) and (pUser is not None) and (qUser is not None):
-        raise ValueError('Input for the quantile (%s) and percentile (%s) do not match. Either only enter one or ensure they are the same'%(qUser, pUser))
-    elif (qUser is None) and (pUser is not None):
-        qUser = pUser
-
 
     #initialize communicator, get rank of each thread, and get total number of threads
     comm = MPI.COMM_WORLD
