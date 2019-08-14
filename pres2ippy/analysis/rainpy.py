@@ -34,6 +34,8 @@ class DateTest(object):
         y-intercepts of the quantile regression model.
     slope : array, shape (lat, lon)
         Slopes of the quantile regression model.
+    length : int
+        Number of days to consider.
     model : array, shape (lat, lon)
         95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``.
     kdeGridX : array, shape (261, 622)
@@ -71,20 +73,35 @@ class DateTest(object):
         _day = np.array([d.day for d in time])
         intercept = nc.variables['intercept'][:]
         slope = nc.variables['slope'][:]
-        del time,timeUnits,timeCalendar,nc,d
+        del time,timeUnits,timeCalendar,nc
 
     _daysInMonth = {'1':['January',31], '2':['February',28], '3':['March',31],
                     '4':['April',30], '5':['May',31], '6':['June',30],
                     '7':['July',31], '8':['August',31], '9':['September',30],
                     '10':['October',31], '11':['November',30], '12':['December',31]}
 
-
-    def __init__(self,month,day,year):
+    def __init__(self,month,day,year,length=14):
         #init called first
         #print('init method called')
         self.month = month
         self.day = day
         self.year = year
+        self.length = length
+
+        """
+        with Dataset('/share/data1/ty/models/quantReg.95.%s.nc'%(self.length),'r') as nc:
+            self.lat = nc.variables['lat'][:]
+            self.lon = nc.variables['lon'][:]
+            time = nc.variables['time'][:]
+            timeUnits = nc.variables['time'].units
+            timeCalendar = nc.variables['time'].calendar
+            time = num2date(time,timeUnits,timeCalendar)
+            self._month = np.array([d.month for d in time])
+            self._day = np.array([d.day for d in time])
+            self.intercept = nc.variables['intercept'][:]
+            self.slope = nc.variables['slope'][:]
+        """
+
         loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
         self.model = self.intercept[loc,:,:] + self.slope[loc,:,:]*self.year
 
@@ -98,9 +115,10 @@ class DateTest(object):
         self.daysOver2 = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.frac = np.zeros((self.lat.size, self.lon.size)) * np.nan
         self.extreme = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.Z = np.zeros((self.lat[::3].size, self.lon[::3].size)) * np.nan
+        self.Z = np.zeros_like(self.kdeGridX) * np.nan
         self.areas = {}
         self.polys = []
+        self._noPoints = False
 
     def __repr__(self):
         return 'DateTest(month=%s, day=%s, year=%s)'%(self.month, self.day, self.year)
@@ -154,6 +172,22 @@ class DateTest(object):
         else:
             self.__year = val
 
+    '''
+    @property
+    def length(self):
+        """Get or set the length of the window being considered.
+        """
+        return self.__length
+
+    @length.setter
+    def length(self,val):
+        validLengths = [14]
+        if val not in validLengths:
+            raise ValueError('%s is currently not a supported length.'%(val))
+        else:
+            self.__length = val
+    '''
+
     @property
     def DATE_BEGIN(self):
         """Set the beginning date instance attribute. ``DATE_BEGIN`` will be type `datetime <https://docs.python.org/2/library/datetime.html>`_.
@@ -166,6 +200,7 @@ class DateTest(object):
         ``DATE_BEGIN`` is incremented by 13 days to have an inclusive 14-day window.
         """
         return self.DATE_BEGIN + datetime.timedelta(days=13)
+        #return self.DATE_BEGIN + datetime.timedelta(days=self.length-1)
 
     def getObs(self):
         """Retrive Livneh reanalyses from the year specified by the object.
@@ -176,24 +211,59 @@ class DateTest(object):
         if the rainfall was greater than the extreme threshold and 0 if less than the extreme
         threshold.
         """
-        with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.year)+'.nc','r') as nc:
-            #print('Getting observations from %s'%self.year)
-            time = nc.variables['time'][:]
-            timeUnits = nc.variables['time'].units
-            timeCalendar = nc.variables['time'].calendar
-            time = num2date(time,timeUnits,timeCalendar)
-            month = np.array([d.month for d in time])
-            day = np.array([d.day for d in time])
-            self.obs = nc.variables['prec'][:]
-            if self.DATE_BEGIN.month == self.DATE_END.month:
-                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-            else:
-                locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+        #last day in which all days in the window are in the same year
+        cutoffDay = datetime.datetime(self.year,12,31) - datetime.timedelta(days=self.length-1)
 
-            self.obs = self.obs[locs,:,:]
-            self.obs = self.obs.filled(np.nan)
-            self.total = np.sum(self.obs,axis=0)
-            self.diff = self.total - self.model
+        if cutoffDay > self.DATE_END:
+            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.year)+'.nc','r') as nc:
+                #print('Getting observations from %s'%self.year)
+                time = nc.variables['time'][:]
+                timeUnits = nc.variables['time'].units
+                timeCalendar = nc.variables['time'].calendar
+                time = num2date(time,timeUnits,timeCalendar)
+                month = np.array([d.month for d in time])
+                day = np.array([d.day for d in time])
+                self.obs = nc.variables['prec'][:]
+
+            if self.DATE_BEGIN.month == self.DATE_END.month:
+                self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+            else:
+                self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+
+            self.obs = self.obs[self._locs,:,:]
+            self._time = time[self._locs]
+
+        else:
+            #here, the window goes into the following year so we must load two files
+            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
+                time = nc.variables['time'][:]
+                timeUnits = nc.variables['time'].units
+                timeCalendar = nc.variables['time'].calendar
+                time1 = num2date(time,timeUnits,timeCalendar)
+                month = np.array([d.month for d in time1])
+                day = np.array([d.day for d in time1])
+
+                time1Locs = np.where(((month>=self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month<=12)&(day<=31)))[0]
+                time1Obs = nc.variables['prec'][time1Locs,:,:]
+                time1Obs = time1Obs.filled(np.nan)
+
+            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.DATE_END.year)+'.nc', 'r') as nc:
+                time = nc.variables['time'][:]
+                timeUnits = nc.variables['time'].units
+                timeCalendar = nc.variables['time'].calendar
+                time2 = num2date(time,timeUnits,timeCalendar)
+                month = np.array([d.month for d in time2])
+                day = np.array([d.day for d in time2])
+
+                time2Locs = np.where(((month>=1)&(day>=1)) & ((month<=self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+                time2Obs = nc.variables['prec'][time2Locs,:,:]
+                time2Obs = time2Obs.filled(np.nan)
+
+            self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
+            self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
+
+        self.total = np.sum(self.obs,axis=0)
+        self.diff = self.total - self.model
         return
 
     def checkRainyDays(self):
@@ -285,6 +355,10 @@ class DateTest(object):
 
         x,y = np.meshgrid(self.lon, self.lat)
         locs = np.ma.where(self.extreme == 1)
+        if locs[0].size == 0:
+            print('No extreme points')
+            self._noPoints = True
+            return
         Xtrain = np.zeros((locs[0].size, 2)) * np.nan
 
         if weighted:
@@ -309,9 +383,9 @@ class DateTest(object):
         kwargs.setdefault('metric', 'haversine')
         kwargs.setdefault('kernel', 'epanechnikov')
         kwargs.setdefault('algorithm', 'ball_tree')
-        self.kde = KernelDensity(**kwargs)
-        self.kde.fit(XtrainRad, sample_weight=weighted)
-        self.Z = np.exp(self.kde.score_samples(xy))
+        self.KDE = KernelDensity(**kwargs)
+        self.KDE.fit(XtrainRad, sample_weight=weighted)
+        self.Z = np.exp(self.KDE.score_samples(xy))
         self.Z = self.Z.reshape(self.kdeGridX.shape)
         return
 
@@ -323,23 +397,41 @@ class DateTest(object):
         perc : float in range of [0,100]
             Percentile to find in the KDE distribution; must be between 0 and 100, inclusive (defaults to 95)
         """
-        if np.where(~np.isnan(self.Z))[0].size == 0:
+        if self._noPoints:
+            return np.nan
+        elif np.where(~np.isnan(self.Z))[0].size == 0:
             self.kde()
         return np.nanpercentile(a=self.Z, q=perc)
 
-    def getContours(self):
+    def getContours(self, ticks=None):
         """Method to draw contour for extreme region.
 
         Utilizing ``cartopy`` to setup Albers Equal Area projection since ``Basemap``
-        is not installed in the environment being used to make shapefile.
+        is not installed in the environment being used to make the shapefile.
         """
         import cartopy.crs as ccrs
-        ax = plt.axes(projection=ccrs.AlbersEqualArea(central_latitude=35, central_longitude=250))
+
+        if self._noPoints:
+            return
+
+        if ticks is None:
+            levels = [self.calcKDEPercentile()]
+        else:
+            levels = [ticks]
+
+        self._origProj = ccrs.PlateCarree()
+        self._targetProj = ccrs.AlbersEqualArea(central_latitude=35, central_longitude=250)
+
+        ax = plt.axes(projection=self._targetProj)
         ax.set_extent([232,294,24,50])
-        self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.Z, levels=[self.calcKDEPercentile()],
-                            transform=ccrs.AlbersEqualArea)
+        self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.Z, levels=levels,
+                            transform=self._origProj)
+
         self._levels = self._im.levels
         return
+
+    def _coordTransform(self, x, y):
+        return self._targetProj.transform_points(self._origProj, x, y)
 
     def calcAreas(self):
         """Calculate the area of the polygons in the KDE map shown by :func:`getContours`.
@@ -353,6 +445,9 @@ class DateTest(object):
         Areas for each contour are stored in a dictionary and assigned as an instance attribute
         with units of squared kilometers.
         """
+        if self._noPoints:
+            return
+
         try:
             getattr(self, '_im')
         except AttributeError:
@@ -361,18 +456,60 @@ class DateTest(object):
             self.getContours()
 
         numContours = len(self._im.collections)
-        self.areas = {}
-        #self.polys = []
         for i in range(numContours):
             areas = []
             for region in self._im.collections[i].get_paths():
-                x = region.vertices[:,0]
-                y = region.vertices[:,1]
+                trans = self._coordTransform(x=region.vertices[:,0], y=region.vertices[:,1])
+                x = trans[:,0]
+                y = trans[:,1]
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
                 a = np.abs(a) / (1000.**2)
                 areas.append(a)
-                #if a >= 100000.:
-                    #lons, lats = self._m(x, y, inverse=True)
-                    #self.polys.append(Polygon([(j[0], j[1]) for j in zip(lons,lats)]))
+                if a >= 100000.:
+                    self.polys.append(Polygon([(j[0], j[1]) for j in zip(region.vertices[:,0],region.vertices[:,1])]))
             self.areas[self._levels[i]] = areas
         return
+
+    def maskOutsideRegion(self):
+        """Set all points outside extreme region to NaN.
+        """
+        import xarray as xr
+        import salem
+
+        if self._noPoints:
+            self.Z = np.zeros_like(self.kdeGridX)
+            return
+        elif len(self.polys) == 0:
+            print('No extreme regions')
+            return
+        else:
+            daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon})
+            total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
+
+            self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
+            self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
+            for i in range(len(self.polys)):
+                self.regionsDaily[i,:] = daily.salem.roi(geometry=self.polys[i])
+                self.regionsTotal[i,:] = total.salem.roi(geometry=self.polys[i])
+
+            #calc the cosine of the latitudes for the weights and average across the lons
+            weights = np.cos(np.radians(self.lat))
+            tmp = np.nanmean(self.regionsTotal, axis=2)
+            #take average over lats
+            self.weightedTotal = np.nanmean(tmp, axis=1, weights=weights)
+
+            p,t,y,x = self.regionsDaily.shape
+            self.regionsDaily = self.regionsDaily.reshape(p,t*y*x)
+            p,y,x = self.regionsTotal.shape
+            self.regionsTotal = self.regionsTotal.reshape(p,y*x)
+
+            """
+            ax = plt.axes(projection=self._targetProj)
+            ax.set_extent([232,294,24,50])
+            im = plt.contourf(self.lon, self.lat, self.regions[0,:,:],
+                                transform=self._origProj)
+            plt.colorbar(im)
+            ax.coastlines()
+            plt.show(block=False)
+            """
+            return
