@@ -1,7 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import colors
+from matplotlib import cm, colors
 from mpl_toolkits.basemap import Basemap
+
+class InputError(Exception):
+    pass
 
 def plotSlopes(obj):
     """Plot the slope of the quantile regression model for the
@@ -14,7 +17,7 @@ def plotSlopes(obj):
     """
     x,y = np.meshgrid(obj.lon, obj.lat)
     cmap = cm.get_cmap('BrBG')
-    my_colors = [
+    colorsSlope = [
         cmap(1./20), #-1 to -0.9
         cmap(2./20), #-0.9 to -0.8
         cmap(3./20), #-0.8 to -0.7
@@ -36,11 +39,11 @@ def plotSlopes(obj):
         cmap(18./20), #0.8 to 0.9
         cmap(19./20) #0.9 to 1.0
     ]
-    bounds = np.arange(-1,1.1,0.2)
-    my_cmap = colors.ListedColormap(my_colors)
-    my_cmap.set_under(cmap(0.0))
-    my_cmap.set_over(cmap(1.0))
-    norm = colors.BoundaryNorm(bounds, my_cmap.N)
+    boundsSlope = np.arange(-1,1.1,0.2)
+    cmapSlope = colors.ListedColormap(colorsSlope)
+    cmapSlope.set_under(cmap(0.0))
+    cmapSlope.set_over(cmap(1.0))
+    normSlope = colors.BoundaryNorm(boundsSlope, cmapSlope.N)
 
     fig = plt.figure(figsize=(8,6))
     m = Basemap(projection='aea',resolution='l',
@@ -147,7 +150,26 @@ def plotExtremePoints(obj):
     plt.show(block=False)
     return
 
-def makePlot(obj, filled=True, **kwargs):
+def area(im):
+    numContours = len(im.collections)
+    areasDict = {}
+    #self.polys = []
+    for i in range(numContours):
+        areas = []
+        for region in im.collections[i].get_paths():
+            x=region.vertices[:,0]
+            y=region.vertices[:,1]
+            a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
+            a = np.abs(a) / (1000.**2)
+            areas.append(a)
+            #if a >= 100000.:
+                #lons, lats = self._m(x, y, inverse=True)
+                #self.polys.append(Polygon([(j[0], j[1]) for j in zip(lons,lats)]))
+        areasDict[im.levels[i]] = areas
+    print(areasDict)
+    return
+
+def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
     """Make 3- or 4-panel plot based on instance attributes.
 
     Top left panel will always be the rainfall given by the Livneh dataset.
@@ -162,18 +184,36 @@ def makePlot(obj, filled=True, **kwargs):
         :class:`rainpy` object for the desired 14-day period.
     filled : boolean
         If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
+    cmapRain : str
+        Type of colormap to use for the top 2 panels. Current options are a colormap made by
+        Greg Jennrich ('greg'), or a copy of the colormap used on the PRISM website ('prism')
     **kwargs
         Additional keyword arguments accepted by matplotlib's `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
         Function and matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ Function.
     """
+    cmapOptions = ['greg','prism']
+    if cmapRain.lower() not in cmapOptions:
+        raise InputError('%s is not a current option. Options are %s'%(cmapRain,cmapOptions))
 
     x,y = np.meshgrid(obj.lon,obj.lat)
-    boundsPrecip = np.linspace(0,600,17)
-    colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
-            'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
-    cmapPrecip = colors.ListedColormap(colorsPrecip)
-    cmapPrecip.set_over('gainsboro')
-    normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
+
+    if cmapRain.lower() == 'greg':
+        boundsPrecip = np.linspace(0,600,17)
+        colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
+                'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
+        cmapPrecip = colors.ListedColormap(colorsPrecip)
+        cmapPrecip.set_over('gainsboro')
+        normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
+    elif cmapRain.lower() == 'prism':
+        boundsPrecip = [0,0.01,0.1,0.2,0.4,0.6,0.8,1.2,1.6,2,2.4,2.8,3.2,4,5,6,8,12,16,20]
+        boundsPrecip = [i*25.4 for i in boundsPrecip]
+        colorsPrecip = ['#ffffff','#810000','#ae3400','#e46600','#ff9600','#ffc900',
+                        '#fffb00','#c0ff00','#68fa00','#12ff2c','#2cff8e','#15ffe9',
+                        '#33b6ff','#335eff','#2100ff','#8d00ff','#de00ff','#ff56ff',
+                        '#ffaeff']
+        cmapPrecip = colors.ListedColormap(colorsPrecip)
+        cmapPrecip.set_over('#ffd0ff')
+        normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
 
     fig = plt.figure(figsize=(13,10))
     for plot_num, contour in enumerate([obj.total,obj.model,obj.extreme]):
@@ -217,12 +257,13 @@ def makePlot(obj, filled=True, **kwargs):
             im = m.contour(obj.kdeGridX, obj.kdeGridY, obj.Z, latlon=True, **kwargs)
             #plt.clabel(obj._im, fmt='%1.0f', fontsize='small')
 
-        ax.set_title('(d) KDE with %s Kernel and %s Bandwidth'%(obj.kde.kernel.capitalize(), obj.kde.bandwidth))
+        ax.set_title('(d) KDE with %s Kernel and %s Bandwidth'%(obj.KDE.kernel.capitalize(), obj.KDE.bandwidth))
     else:
         pass
 
     plt.tight_layout()
     plt.show(block=False)
+    #area(im)
     return
 
 def plotKDEDistribution(obj):
