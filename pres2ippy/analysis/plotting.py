@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from mpl_toolkits.basemap import Basemap
+import os
+import colormaps
+
+wdir = os.getcwd()
 
 class InputError(Exception):
     pass
@@ -16,34 +20,7 @@ def plotSlopes(obj):
         :class:`rainpy` object for the desired 14-day period.
     """
     x,y = np.meshgrid(obj.lon, obj.lat)
-    cmap = cm.get_cmap('BrBG')
-    colorsSlope = [
-        cmap(1./20), #-1 to -0.9
-        cmap(2./20), #-0.9 to -0.8
-        cmap(3./20), #-0.8 to -0.7
-        cmap(4./20), #-0.7 to -0.6
-        cmap(5./20), #-0.6 to -0.5
-        cmap(6./20), #-0.5 to -0.4
-        cmap(7./20), #-0.4 to -0.3
-        cmap(8./20), #-0.3 to -0.2
-        cmap(9./20), #-0.2 to -0.1
-        'white', #-0.1 to 0
-        'white', #0 to 0.1
-        cmap(11./20), #0.1 to 0.2
-        cmap(12./20), #0.2 to 0.3
-        cmap(13./20), #0.3 to 0.4
-        cmap(14./20), #0.4 to 0.5
-        cmap(15./20), #0.5 to 0.6
-        cmap(16./20), #0.6 to 0.7
-        cmap(17./20), #0.7 to 0.8
-        cmap(18./20), #0.8 to 0.9
-        cmap(19./20) #0.9 to 1.0
-    ]
-    boundsSlope = np.arange(-1,1.1,0.2)
-    cmapSlope = colors.ListedColormap(colorsSlope)
-    cmapSlope.set_under(cmap(0.0))
-    cmapSlope.set_over(cmap(1.0))
-    normSlope = colors.BoundaryNorm(boundsSlope, cmapSlope.N)
+    bounds, my_cmap, norm = colormaps.slopes()
 
     fig = plt.figure(figsize=(8,6))
     m = Basemap(projection='aea',resolution='l',
@@ -113,7 +90,7 @@ def plot3DayTotals(obj, **kwargs):
     m.drawcoastlines()
     m.drawcountries()
     m.drawstates()
-    im = m.contourf(x, y, obj.frac, latlon=True, **kwargs)
+    im = m.contourf(x, y, np.round(obj.frac,3), levels=np.arange(0,1.1,0.1), latlon=True, **kwargs)
     m.colorbar(im, 'bottom')
     plt.tight_layout()
     plt.show(block=False)
@@ -169,7 +146,7 @@ def area(im):
     print(areasDict)
     return
 
-def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
+def makePlot(obj, filled=True, cmapRain='greg', save=False, **kwargs):
     """Make 3- or 4-panel plot based on instance attributes.
 
     Top left panel will always be the rainfall given by the Livneh dataset.
@@ -186,34 +163,22 @@ def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
         If True (default), plot the KDE map as filled contours. Otherwise, do not fill.
     cmapRain : str
         Type of colormap to use for the top 2 panels. Current options are a colormap made by
-        Greg Jennrich ('greg'), or a copy of the colormap used on the PRISM website ('prism')
+        Greg Jennrich ('greg'), a copy of the colormap used on the PRISM website ('prism'),
+        or a similar copy of a radar reflectivity type colormap ('custom').
+    save : boolean
+        If True, save plots to a temporary path. Defaults to False.
     **kwargs
         Additional keyword arguments accepted by matplotlib's `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
         Function and matplotlib's `contourf <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contourf.html>`_ Function.
     """
-    cmapOptions = ['greg','prism']
+    kwargs.setdefault('levels', np.arange(0,1.1,0.1))
+
+    cmapOptions = ['greg','prism','custom']
     if cmapRain.lower() not in cmapOptions:
         raise InputError('%s is not a current option. Options are %s'%(cmapRain,cmapOptions))
 
     x,y = np.meshgrid(obj.lon,obj.lat)
-
-    if cmapRain.lower() == 'greg':
-        boundsPrecip = np.linspace(0,600,17)
-        colorsPrecip = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
-                'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
-        cmapPrecip = colors.ListedColormap(colorsPrecip)
-        cmapPrecip.set_over('gainsboro')
-        normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
-    elif cmapRain.lower() == 'prism':
-        boundsPrecip = [0,0.01,0.1,0.2,0.4,0.6,0.8,1.2,1.6,2,2.4,2.8,3.2,4,5,6,8,12,16,20]
-        boundsPrecip = [i*25.4 for i in boundsPrecip]
-        colorsPrecip = ['#ffffff','#810000','#ae3400','#e46600','#ff9600','#ffc900',
-                        '#fffb00','#c0ff00','#68fa00','#12ff2c','#2cff8e','#15ffe9',
-                        '#33b6ff','#335eff','#2100ff','#8d00ff','#de00ff','#ff56ff',
-                        '#ffaeff']
-        cmapPrecip = colors.ListedColormap(colorsPrecip)
-        cmapPrecip.set_over('#ffd0ff')
-        normPrecip = colors.BoundaryNorm(boundsPrecip, cmapPrecip.N)
+    boundsPrecip, cmapPrecip, normPrecip = colormaps.rainfall(kind=cmapRain.lower())
 
     fig = plt.figure(figsize=(13,10))
     for plot_num, contour in enumerate([obj.total,obj.model,obj.extreme]):
@@ -226,13 +191,13 @@ def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
         m.drawstates()
         if (plot_num == 0):
             im = m.contourf(x,y,contour,levels=boundsPrecip,cmap=cmapPrecip,norm=normPrecip,extend='max',latlon=True)
-            ax.set_title('(a) %s/%s/%s - %s/%s/%s Observed Precipitation'
+            ax.set_title('(a) %d/%d/%d - %d/%d/%d Observed Precipitation'
                 %(obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_BEGIN.year,obj.DATE_END.month,obj.DATE_END.day,obj.DATE_END.year))
             cbar = m.colorbar(im,'bottom')
             cbar.set_label('mm')
         elif (plot_num == 1):
             im = m.contourf(x,y,contour,levels=boundsPrecip,cmap=cmapPrecip,norm=normPrecip,extend='max',latlon=True)
-            ax.set_title('(b) %s/%s/%s - %s/%s/%s 95th Percentile'
+            ax.set_title('(b) %d/%d/%d - %d/%d/%d 95th Percentile'
                 %(obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_BEGIN.year,obj.DATE_END.month,obj.DATE_END.day,obj.DATE_END.year))
             cbar = m.colorbar(im,'bottom')
             cbar.set_label('mm')
@@ -242,7 +207,6 @@ def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
 
     if np.where(~np.isnan(obj.Z))[0].size != 0:
         ax = fig.add_subplot(224)
-        #making the Basemap object a private attribute to be used in _makeDataframe()
         m = Basemap(projection='aea',resolution='l',
             llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
             lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
@@ -252,7 +216,7 @@ def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
         if filled:
             im = m.contourf(obj.kdeGridX, obj.kdeGridY, obj.Z, latlon=True, **kwargs)
             cbar = m.colorbar(im,'bottom')
-            cbar.set_label('Density')
+            cbar.set_label('Normalized Density')
         else:
             im = m.contour(obj.kdeGridX, obj.kdeGridY, obj.Z, latlon=True, **kwargs)
             #plt.clabel(obj._im, fmt='%1.0f', fontsize='small')
@@ -263,6 +227,8 @@ def makePlot(obj, filled=True, cmapRain='greg', **kwargs):
 
     plt.tight_layout()
     plt.show(block=False)
+    if save:
+        fig.savefig('%s/tmp/%d.%d.%d.png'%(wdir,obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_BEGIN.year))
     #area(im)
     return
 
@@ -273,7 +239,7 @@ def plotKDEDistribution(obj):
         obj.kde()
 
     fig = plt.figure(figsize=(8,6))
-    plt.hist(obj.Z.ravel(), bins=np.arange(0, np.round(np.max(obj.Z))+1, 1), density=True,
+    plt.hist(obj.Z.ravel(), bins=np.arange(0, 1.01, 0.05), density=True,
             color='deepskyblue', ec='k')
     plt.yticks(np.arange(0, 1.1, 0.1))
     plt.xlabel('KDE Density', fontsize=13)
