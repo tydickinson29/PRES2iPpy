@@ -3,6 +3,7 @@ from netCDF4 import Dataset,num2date
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from sklearn.neighbors import KernelDensity
+from sklearn.model_selection import GridSearchCV
 from shapely.geometry import Polygon
 import pandas as pd
 import datetime
@@ -10,6 +11,15 @@ import warnings
 #import time as t
 warnings.simplefilter("ignore")
 
+"""
+try:
+    import salem
+    import xarray as xr
+    _applyMask = True
+except ImportError as e:
+    print('%s, will not be able to mask precip obs outside of CONUS.'%e)
+    _applyMask = False
+"""
 class DateTest(object):
     """Make plots of potential 14-day extreme precipitation events and
     see their associated kernel density estimation maps to denote the extreme
@@ -44,6 +54,8 @@ class DateTest(object):
         Latitude grid the kernel density estimation is evaluated onto. Range is [24N, 50N] every 1/10th of a degree.
     obs : array, shape (lat, lon)
         Recorded precipitation each day from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
+    units : string
+        Units of any precipitation measurement or statistic unless otherwise noted. Filled after :func:`getObs` is called.
     total : array, shape(lat, lon)
         Total precipitation from the Livneh dataset (i.e., sum at each grid point of ``obs``). Filled after :func:`getObs` is called.
     diff : array, shape (lat, lon)
@@ -62,9 +74,15 @@ class DateTest(object):
         Areas of KDE (:func:`kde`) contours drawn in square kilometers. Filled after :func:`getAreas` is called.
     """
 
+    #global _applyMask
+
+    #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
+    #with lengths 14, 30, 60, and 90. Take additional argument in constructor
+    #to slice intercept, slope for correct length
     with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
         lat = nc.variables['lat'][:]
         lon = nc.variables['lon'][:]
+        #length = nc.variables['length'][:]
         time = nc.variables['time'][:]
         timeUnits = nc.variables['time'].units
         timeCalendar = nc.variables['time'].calendar
@@ -88,22 +106,9 @@ class DateTest(object):
         self.year = year
         self.length = length
 
-        """
-        with Dataset('/share/data1/ty/models/quantReg.95.%s.nc'%(self.length),'r') as nc:
-            self.lat = nc.variables['lat'][:]
-            self.lon = nc.variables['lon'][:]
-            time = nc.variables['time'][:]
-            timeUnits = nc.variables['time'].units
-            timeCalendar = nc.variables['time'].calendar
-            time = num2date(time,timeUnits,timeCalendar)
-            self._month = np.array([d.month for d in time])
-            self._day = np.array([d.day for d in time])
-            self.intercept = nc.variables['intercept'][:]
-            self.slope = nc.variables['slope'][:]
-        """
-
-        loc = np.where((self._month == self.month) & (self._day == self.day))[0][0]
-        self.model = self.intercept[loc,:,:] + self.slope[loc,:,:]*self.year
+        #ilength = np.where(length == self.length)[0][0]
+        itime = np.where((self._month == self.month) & (self._day == self.day))[0][0]
+        self.model = self.intercept[itime,:,:] + self.slope[itime,:,:]*self.year
 
         gridLats = np.arange(24, 50.1, 0.1)
         gridLons = np.arange(232, 294.1, 0.1)
@@ -202,6 +207,18 @@ class DateTest(object):
         return self.DATE_BEGIN + datetime.timedelta(days=13)
         #return self.DATE_BEGIN + datetime.timedelta(days=self.length-1)
 
+    """
+    def _mask(self, arrToMask):
+        arr = xr.DataArray(arrToMask, dims=['lat','lon'],
+                coords={'lat':self.lat,'lon':self.lon})
+
+        shp = salem.read_shapefile('/share/data1/ty/NA_shapefile/North_America.shp')
+        shpSlice = shp.loc[shp['NAME'].isin(['UNITED STATES'])]
+        test = arr.salem.roi(shape=shpSlice)
+        test = test.values
+        return arrToMask
+    """
+
     def getObs(self):
         """Retrive Livneh reanalyses from the year specified by the object.
 
@@ -224,6 +241,7 @@ class DateTest(object):
                 month = np.array([d.month for d in time])
                 day = np.array([d.day for d in time])
                 self.obs = nc.variables['prec'][:]
+                self.units = nc.variables['prec'].units
 
             if self.DATE_BEGIN.month == self.DATE_END.month:
                 self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
@@ -231,6 +249,7 @@ class DateTest(object):
                 self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
 
             self.obs = self.obs[self._locs,:,:]
+            self.obs = self.obs.filled(np.nan)
             self._time = time[self._locs]
 
         else:
@@ -246,6 +265,7 @@ class DateTest(object):
                 time1Locs = np.where(((month>=self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month<=12)&(day<=31)))[0]
                 time1Obs = nc.variables['prec'][time1Locs,:,:]
                 time1Obs = time1Obs.filled(np.nan)
+                self.units = nc.variables['prec'].units
 
             with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.DATE_END.year)+'.nc', 'r') as nc:
                 time = nc.variables['time'][:]
@@ -263,6 +283,8 @@ class DateTest(object):
             self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
 
         self.total = np.sum(self.obs,axis=0)
+        #self.model = self._mask(self.model)
+        #self.total = self._mask(self.total)
         self.diff = self.total - self.model
         return
 
@@ -375,7 +397,7 @@ class DateTest(object):
                 Xtrain[i,1] = x[locs[0][i], locs[1][i]]
 
         #convert from lat/lon to radians
-        XtrainRad = Xtrain * np.pi / 180.
+        self._XtrainRad = Xtrain * np.pi / 180.
         xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
         xy *= np.pi / 180.
 
@@ -384,8 +406,10 @@ class DateTest(object):
         kwargs.setdefault('kernel', 'epanechnikov')
         kwargs.setdefault('algorithm', 'ball_tree')
         self.KDE = KernelDensity(**kwargs)
-        self.KDE.fit(XtrainRad, sample_weight=weighted)
+        self.KDE.fit(self._XtrainRad, sample_weight=weighted)
         self.Z = np.exp(self.KDE.score_samples(xy))
+        #divide by max to normalize density field
+        self.Z = self.Z / np.nanmax(self.Z)
         self.Z = self.Z.reshape(self.kdeGridX.shape)
         return
 
@@ -472,6 +496,10 @@ class DateTest(object):
 
     def maskOutsideRegion(self):
         """Set all points outside extreme region to NaN.
+
+        Additionally, arrays are created to find areal-averaged precipitation,
+        maximum 1-day and 14-day precipitation, and the total precipitation over
+        the extreme threshold in the extreme region.
         """
         import xarray as xr
         import salem
@@ -485,23 +513,29 @@ class DateTest(object):
         else:
             daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon})
             total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
+            diff = xr.DataArray(self.diff, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
 
             self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
             self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
+            self.regionsDiff = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
             for i in range(len(self.polys)):
-                self.regionsDaily[i,:] = daily.salem.roi(geometry=self.polys[i])
-                self.regionsTotal[i,:] = total.salem.roi(geometry=self.polys[i])
+                self.regionsDaily[i,:,:,:] = daily.salem.roi(geometry=self.polys[i])
+                self.regionsTotal[i,:,:] = total.salem.roi(geometry=self.polys[i])
+                self.regionsDiff[i,:,:] = diff.salem.roi(geometry=self.polys[i])
 
             #calc the cosine of the latitudes for the weights and average across the lons
             weights = np.cos(np.radians(self.lat))
             tmp = np.nanmean(self.regionsTotal, axis=2)
+            #mask nans to accurately calculate weighted average
+            tmp = np.ma.masked_array(tmp, np.isnan(tmp))
             #take average over lats
-            self.weightedTotal = np.nanmean(tmp, axis=1, weights=weights)
+            self.weightedTotal = np.ma.average(tmp, axis=1, weights=weights)
 
             p,t,y,x = self.regionsDaily.shape
             self.regionsDaily = self.regionsDaily.reshape(p,t*y*x)
             p,y,x = self.regionsTotal.shape
             self.regionsTotal = self.regionsTotal.reshape(p,y*x)
+            self.regionsDiff = self.regionsDiff.reshape(p,y*x)
 
             """
             ax = plt.axes(projection=self._targetProj)
@@ -513,3 +547,11 @@ class DateTest(object):
             plt.show(block=False)
             """
             return
+    """
+    def calcOptimalBandwidth(self,params):
+        grid = GridSearchCV(KernelDensity(kernel='epanechnikov', metric='haversine'), params, n_jobs=10)
+        grid.fit(self._XtrainRad)
+
+        print('best bandwidth: %f'%grid.best_estimator_.bandwidth)
+        return
+    """
