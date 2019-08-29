@@ -75,24 +75,6 @@ class DateTest(object):
     """
 
     #global _applyMask
-
-    #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
-    #with lengths 14, 30, 60, and 90. Take additional argument in constructor
-    #to slice intercept, slope for correct length
-    with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
-        lat = nc.variables['lat'][:]
-        lon = nc.variables['lon'][:]
-        #length = nc.variables['length'][:]
-        time = nc.variables['time'][:]
-        timeUnits = nc.variables['time'].units
-        timeCalendar = nc.variables['time'].calendar
-        time = num2date(time,timeUnits,timeCalendar)
-        _month = np.array([d.month for d in time])
-        _day = np.array([d.day for d in time])
-        intercept = nc.variables['intercept'][:]
-        slope = nc.variables['slope'][:]
-        del time,timeUnits,timeCalendar,nc
-
     _daysInMonth = {'1':['January',31], '2':['February',28], '3':['March',31],
                     '4':['April',30], '5':['May',31], '6':['June',30],
                     '7':['July',31], '8':['August',31], '9':['September',30],
@@ -106,9 +88,28 @@ class DateTest(object):
         self.year = year
         self.length = length
 
-        #ilength = np.where(length == self.length)[0][0]
-        itime = np.where((self._month == self.month) & (self._day == self.day))[0][0]
-        self.model = self.intercept[itime,:,:] + self.slope[itime,:,:]*self.year
+        #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
+        #with lengths 14, 30, 60, and 90. Take additional argument in constructor
+        #to slice intercept, slope for correct length
+        with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
+            self.lat = nc.variables['lat'][:]
+            self.lon = nc.variables['lon'][:]
+            #length = nc.variables['length'][:]
+            time = nc.variables['time'][:]
+            timeUnits = nc.variables['time'].units
+            timeCalendar = nc.variables['time'].calendar
+            self.time = num2date(time,timeUnits,timeCalendar)
+            self._month = np.array([d.month for d in self.time])
+            self._day = np.array([d.day for d in self.time])
+
+            #ilength = np.where(length == self.length)[0][0]
+            itime = np.where((self._month == self.month) & (self._day == self.day))[0][0]
+
+            self.intercept = nc.variables['intercept'][itime,:,:]
+            self.slope = nc.variables['slope'][itime,:,:]
+            del time,timeUnits,timeCalendar,nc
+
+        self.model = self.intercept + self.slope*self.year
 
         gridLats = np.arange(24, 50.1, 0.1)
         gridLons = np.arange(232, 294.1, 0.1)
