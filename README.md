@@ -1,6 +1,6 @@
 # PRES2iPpy
 
-This repository is to document the code used for analysis by Ty Dickinson as a part of the PRES2iP team at the University of Oklahoma. 
+This repository is to document the code used for analysis by Ty A. Dickinson as a part of the PRES2iP team at the University of Oklahoma. 
 
 ## What is PRES2iP?
 
@@ -8,10 +8,16 @@ PRES2iP stands for Prediction of Rainfall Extremes at Subseasonal to Seasonal Pe
 
 ## Versions of Packages Used
 - `basemap` = 1.2.0
-- `netcdf4` = 1.4.3
+- `cartopy` = 0.17.0
+- `geopandas` = 0.5.1
+- `netcdf4` = 1.4.2
 - `numpy` = 1.16.4
 - `matplotlib` = 2.2.3
-- `mpi4py` = 3.0.0
-- `OpenMPI` = 3.1.1
+- `mpi4py` = 3.0.1
+- `mpi` = 1.0
+- `mpich` = 3.2.1
+- `salem` = 0.2.4
 - `scikit-learn` = 0.20.3
-- `statsmodels` = 0.9.0
+- `shapely` = 1.6.4
+- `statsmodels` = 0.10.0
+- `xarray` = 0.12.3
