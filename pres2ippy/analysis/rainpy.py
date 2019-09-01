@@ -33,19 +33,25 @@ class DateTest(object):
         The day of the event.
     year : int
         The year of the event. Currently must be between 1915 and 2011, inclusive.
+    length : int
+        Length of model to be used in analysis. Current option is only 14; 30, 60, and 90 to be added.
 
     Attributes
     ----------
-    lat : array, shape (444,)
+    DATE_BEGIN: datetime
+        Datetime object specifying the beginning date.
+    DATE_END : datetime
+        Datetime object specifying the ending date.
+    lat : array, shape (444)
         Latitudes for the quantile regression model grid.
     lon : array, shape (922)
         Longitudes for the quantile regression model grid.
+    time : array, shape (length)
+        Datetime objects specifying all days being analyzed.
     intercept : array, shape (lat, lon)
         y-intercepts of the quantile regression model.
     slope : array, shape (lat, lon)
         Slopes of the quantile regression model.
-    length : int
-        Number of days to consider.
     model : array, shape (lat, lon)
         95th percentile grid; calculated by doing ``intercept`` + ``slope`` x ``year`` for the input ``day``.
     kdeGridX : array, shape (261, 622)
@@ -68,10 +74,22 @@ class DateTest(object):
         Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`check3DayTotals` is called.
     extreme : array, shape (lat, lon)
         True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`getExtremePoints` is called.
+    KDE: object
+        Parameters being used in scikit-learn's `KernelDensity <https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KernelDensity.html#sklearn.neighbors.KernelDensity>`_ class.
     Z : array, shape (kdeGridX, kdeGridY)
         Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
+    polys : list
+        List of Shapely `Polygon <https://shapely.readthedocs.io/en/stable/manual.html#polygons>`_s describing the extreme region(s). Filled after :func:`getAreas` is called.
     areas : dict
         Areas of KDE (:func:`kde`) contours drawn in square kilometers. Filled after :func:`getAreas` is called.
+    regionsDaily : array, shape (numRegions, length*lat*lon)
+        Daily precipitation with all areas outside each region set to NaN.
+    regionsTotal : array, shape (numRegions, lat*lon)
+        Event total precipitation with all areas outside each region set to NaN.
+    regionsDiff : array, shape (numRegions)
+        Event totals over extreme threshold for all positive points inside region.
+    weightedTotal : array, shape (numRegions)
+        Areal-averaged precipitation for all points inside extreme region.
     """
 
     #global _applyMask
@@ -93,7 +111,7 @@ class DateTest(object):
         #to slice intercept, slope for correct length
         with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
             self.lat = nc.variables['lat'][:]
-            self.lon = nc.variables['lon'][:]
+            self.lon = nc.variables['lon'][:] - 360.
             #length = nc.variables['length'][:]
             time = nc.variables['time'][:]
             timeUnits = nc.variables['time'].units
@@ -173,8 +191,8 @@ class DateTest(object):
     def year(self,val):
         if (val < 1915):
             raise ValueError('Years before 1915 are currently not supported.')
-        elif (val > 2011):
-            raise ValueError('Years after 2011 are currently not supported.')
+        elif (val > 2018):
+            raise ValueError('Years after 2018 are currently not supported.')
         else:
             self.__year = val
 
@@ -208,6 +226,13 @@ class DateTest(object):
         return self.DATE_BEGIN + datetime.timedelta(days=13)
         #return self.DATE_BEGIN + datetime.timedelta(days=self.length-1)
 
+    @property
+    def dataset(self):
+        if self.year < 2012:
+            return 'Livneh'
+        else:
+            return 'PRISM'
+
     """
     def _mask(self, arrToMask):
         arr = xr.DataArray(arrToMask, dims=['lat','lon'],
@@ -220,6 +245,36 @@ class DateTest(object):
         return arrToMask
     """
 
+    def _interp(self):
+        """Interpolate PRISM grid to Livneh grid in order to correctly compare to extreme thresholds.
+        """
+        from mpl_toolkits.basemap import interp
+
+        with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
+            latPRISM = nc.variables['lat'][:]
+            lonPRISM = nc.variables['lon'][:]
+
+        with Dataset('/share/data1/reanalyses/Livneh/prec.day.ltm.nc', 'r') as nc:
+            latLivneh = nc.variables['lat'][:]
+            lonLivneh = nc.variables['lon'][:] - 360.
+
+        iX = np.where((lonLivneh >= lonPRISM.min()) & (lonLivneh <= lonPRISM.max()))[0]
+        iY = np.where((latLivneh >= latPRISM.min()) & (latLivneh <= latPRISM.max()))[0]
+        #Adjust lats and lons to new interpolated grid (N-S bounds slightly less)
+        self.lat = latLivneh[iY]
+        self.lon = lonLivneh[iX]
+        lonMesh,latMesh = np.meshgrid(lonLivneh[iX],latLivneh[iY])
+
+        #interpolate PRISM obs to Livneh grid each day at a time
+        tmp = np.zeros((self.length,lonMesh.shape[0],lonMesh.shape[1]))
+        for i in range(tmp.shape[0]):
+            tmp[i,:,:] = interp(datain=self.obs[i,::-1,:], xin=lonPRISM, yin=latPRISM[::-1],
+                            xout=lonMesh, yout=latMesh, order=1)
+        self.obs = tmp
+        #adjust model to new grid
+        self.model = self.model[iY,:][:,iX]
+        return
+
     def getObs(self):
         """Retrive Livneh reanalyses from the year specified by the object.
 
@@ -229,11 +284,16 @@ class DateTest(object):
         if the rainfall was greater than the extreme threshold and 0 if less than the extreme
         threshold.
         """
+        if self.dataset == 'Livneh':
+            pathToFiles = '/share/data1/reanalyses/Livneh/prec.'
+        else:
+            pathToFiles = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
+
         #last day in which all days in the window are in the same year
         cutoffDay = datetime.datetime(self.year,12,31) - datetime.timedelta(days=self.length-1)
 
         if cutoffDay > self.DATE_END:
-            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.year)+'.nc','r') as nc:
+            with Dataset(pathToFiles+str(self.year)+'.nc','r') as nc:
                 #print('Getting observations from %s'%self.year)
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
@@ -241,21 +301,21 @@ class DateTest(object):
                 time = num2date(time,timeUnits,timeCalendar)
                 month = np.array([d.month for d in time])
                 day = np.array([d.day for d in time])
-                self.obs = nc.variables['prec'][:]
+
+                if self.DATE_BEGIN.month == self.DATE_END.month:
+                    self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+                else:
+                    self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
+
+                self.obs = nc.variables['prec'][self._locs,:,:]
                 self.units = nc.variables['prec'].units
 
-            if self.DATE_BEGIN.month == self.DATE_END.month:
-                self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-            else:
-                self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-
-            self.obs = self.obs[self._locs,:,:]
             self.obs = self.obs.filled(np.nan)
             self._time = time[self._locs]
 
         else:
             #here, the window goes into the following year so we must load two files
-            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
+            with Dataset(pathToFiles+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -268,7 +328,7 @@ class DateTest(object):
                 time1Obs = time1Obs.filled(np.nan)
                 self.units = nc.variables['prec'].units
 
-            with Dataset('/share/data1/reanalyses/Livneh/prec.'+str(self.DATE_END.year)+'.nc', 'r') as nc:
+            with Dataset(pathToFiles+str(self.DATE_END.year)+'.nc', 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -283,6 +343,8 @@ class DateTest(object):
             self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
             self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
 
+        if self.dataset == 'PRISM':
+            self._interp()
         self.total = np.sum(self.obs,axis=0)
         #self.model = self._mask(self.model)
         #self.total = self._mask(self.total)
