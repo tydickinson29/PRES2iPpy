@@ -109,7 +109,7 @@ class DateTest(object):
         #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
         #with lengths 14, 30, 60, and 90. Take additional argument in constructor
         #to slice intercept, slope for correct length
-        with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
+        with Dataset('/home/tdickinson/data/windows/quantReg.95.14.nc','r') as nc:
             self.lat = nc.variables['lat'][:]
             self.lon = nc.variables['lon'][:] - 360.
             #length = nc.variables['length'][:]
@@ -227,8 +227,15 @@ class DateTest(object):
         #return self.DATE_BEGIN + datetime.timedelta(days=self.length-1)
 
     @property
-    def dataset(self):
-        if self.year < 2012:
+    def datasetBegin(self):
+        if self.DATE_BEGIN.year < 2012:
+            return 'Livneh'
+        else:
+            return 'PRISM'
+
+    @property
+    def datasetEnd(self):
+        if self.DATE_END.year < 2012:
             return 'Livneh'
         else:
             return 'PRISM'
@@ -245,16 +252,63 @@ class DateTest(object):
         return arrToMask
     """
 
-    def _interp(self):
+    def _interp(self, datain, xin, yin, xout, yout):
+          # compute grid coordinates of output grid.
+          delx = xin[1:]-xin[0:-1]
+          dely = yin[1:]-yin[0:-1]
+          if max(delx)-min(delx) < 1.e-4 and max(dely)-min(dely) < 1.e-4:
+              # regular input grid.
+              xcoords = (len(xin)-1)*(xout-xin[0])/(xin[-1]-xin[0])
+              ycoords = (len(yin)-1)*(yout-yin[0])/(yin[-1]-yin[0])
+          else:
+              # irregular (but still rectilinear) input grid.
+              xoutflat = xout.flatten(); youtflat = yout.flatten()
+              ix = (np.searchsorted(xin,xoutflat)-1).tolist()
+              iy = (np.searchsorted(yin,youtflat)-1).tolist()
+              xoutflat = xoutflat.tolist(); xin = xin.tolist()
+              youtflat = youtflat.tolist(); yin = yin.tolist()
+              xcoords = []; ycoords = []
+              for n,i in enumerate(ix):
+                  if i < 0:
+                      xcoords.append(-1) # outside of range on xin (lower end)
+                  elif i >= len(xin)-1:
+                      xcoords.append(len(xin)) # outside range on upper end.
+                  else:
+                      xcoords.append(float(i)+(xoutflat[n]-xin[i])/(xin[i+1]-xin[i]))
+              for m,j in enumerate(iy):
+                  if j < 0:
+                      ycoords.append(-1) # outside of range of yin (on lower end)
+                  elif j >= len(yin)-1:
+                      ycoords.append(len(yin)) # outside range on upper end
+                  else:
+                      ycoords.append(float(j)+(youtflat[m]-yin[j])/(yin[j+1]-yin[j]))
+              xcoords = np.reshape(xcoords,xout.shape)
+              ycoords = np.reshape(ycoords,yout.shape)
+
+          xcoords = np.clip(xcoords,0,len(xin)-1)
+          ycoords = np.clip(ycoords,0,len(yin)-1)
+          xi = xcoords.astype(np.int32)
+          yi = ycoords.astype(np.int32)
+          xip1 = xi+1
+          yip1 = yi+1
+          xip1 = np.clip(xip1,0,len(xin)-1)
+          yip1 = np.clip(yip1,0,len(yin)-1)
+          delx = xcoords-xi.astype(np.float32)
+          dely = ycoords-yi.astype(np.float32)
+          dataout = (1.-delx)*(1.-dely)*datain[yi,xi] + \
+                    delx*dely*datain[yip1,xip1] + \
+                    (1.-delx)*dely*datain[yip1,xi] + \
+                    delx*(1.-dely)*datain[yi,xip1]
+          return dataout
+
+    def interp(self, data, split=False, firstPiece=None):
         """Interpolate PRISM grid to Livneh grid in order to correctly compare to extreme thresholds.
         """
-        from mpl_toolkits.basemap import interp
-
-        with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
+        with Dataset('/home/tdickinson/data/PRISM/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
 
-        with Dataset('/share/data1/reanalyses/Livneh/prec.day.ltm.nc', 'r') as nc:
+        with Dataset('/home/tdickinson/data/Livneh/prec.1915.nc', 'r') as nc:
             latLivneh = nc.variables['lat'][:]
             lonLivneh = nc.variables['lon'][:] - 360.
 
@@ -266,11 +320,14 @@ class DateTest(object):
         lonMesh,latMesh = np.meshgrid(lonLivneh[iX],latLivneh[iY])
 
         #interpolate PRISM obs to Livneh grid each day at a time
-        tmp = np.zeros((self.length,lonMesh.shape[0],lonMesh.shape[1]))
+        tmp = np.zeros((data.shape[0],lonMesh.shape[0],lonMesh.shape[1]))
         for i in range(tmp.shape[0]):
-            tmp[i,:,:] = interp(datain=self.obs[i,::-1,:], xin=lonPRISM, yin=latPRISM[::-1],
-                            xout=lonMesh, yout=latMesh, order=1)
-        self.obs = tmp
+            tmp[i,:,:] = self._interp(datain=data[i], xin=lonPRISM, yin=latPRISM[::-1],
+                            xout=lonMesh, yout=latMesh)
+        if split:
+            self.obs = np.concatenate((firstPiece[:,iY,:][:,:,iX], tmp), axis=0)
+        else:
+            self.obs = tmp
         #adjust model to new grid
         self.model = self.model[iY,:][:,iX]
         return
@@ -284,16 +341,21 @@ class DateTest(object):
         if the rainfall was greater than the extreme threshold and 0 if less than the extreme
         threshold.
         """
-        if self.dataset == 'Livneh':
-            pathToFiles = '/share/data1/reanalyses/Livneh/prec.'
+        split = False
+        if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
+            beginPath = endPath = '/home/tdickinson/data/Livneh/prec.'
+        elif (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'PRISM'):
+            beginPath = endPath = '/home/tdickinson/data/PRISM/prec.'
         else:
-            pathToFiles = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
+            beginPath = '/home/tdickinson/data/Livneh/prec.'
+            endPath = '/home/tdickinson/data/PRISM/prec.'
+            split = True
 
         #last day in which all days in the window are in the same year
         cutoffDay = datetime.datetime(self.year,12,31) - datetime.timedelta(days=self.length-1)
 
         if cutoffDay > self.DATE_END:
-            with Dataset(pathToFiles+str(self.year)+'.nc','r') as nc:
+            with Dataset(beginPath+str(self.year)+'.nc','r') as nc:
                 #print('Getting observations from %s'%self.year)
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
@@ -312,10 +374,14 @@ class DateTest(object):
 
             self.obs = self.obs.filled(np.nan)
             self._time = time[self._locs]
+            if self.datasetBegin == 'PRISM':
+                self.interp(data=self.obs[:,::-1,:])
+            else:
+                self.interp(data=self.obs)
 
         else:
             #here, the window goes into the following year so we must load two files
-            with Dataset(pathToFiles+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
+            with Dataset(beginPath+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -328,7 +394,7 @@ class DateTest(object):
                 time1Obs = time1Obs.filled(np.nan)
                 self.units = nc.variables['prec'].units
 
-            with Dataset(pathToFiles+str(self.DATE_END.year)+'.nc', 'r') as nc:
+            with Dataset(endPath+str(self.DATE_END.year)+'.nc', 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -340,11 +406,16 @@ class DateTest(object):
                 time2Obs = nc.variables['prec'][time2Locs,:,:]
                 time2Obs = time2Obs.filled(np.nan)
 
-            self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
+            if (not split) and (self.datasetEnd == 'Livneh'):
+                self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
+            elif (not split) and (self.datasetBegin == 'PRISM'):
+                self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
+                self.interp(data=self.obs[:,::-1,:])
+            else:
+                self.interp(data=time2Obs[:,::-1,:], split=True, firstPiece=time1Obs)
+
             self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
 
-        if self.dataset == 'PRISM':
-            self._interp()
         self.total = np.sum(self.obs,axis=0)
         #self.model = self._mask(self.model)
         #self.total = self._mask(self.total)
