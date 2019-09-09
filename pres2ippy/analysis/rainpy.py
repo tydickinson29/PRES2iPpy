@@ -109,7 +109,7 @@ class DateTest(object):
         #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
         #with lengths 14, 30, 60, and 90. Take additional argument in constructor
         #to slice intercept, slope for correct length
-        with Dataset('/home/tdickinson/data/windows/quantReg.95.14.nc','r') as nc:
+        with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
             self.lat = nc.variables['lat'][:]
             self.lon = nc.variables['lon'][:] - 360.
             #length = nc.variables['length'][:]
@@ -304,11 +304,11 @@ class DateTest(object):
     def interp(self, data, split=False, firstPiece=None):
         """Interpolate PRISM grid to Livneh grid in order to correctly compare to extreme thresholds.
         """
-        with Dataset('/home/tdickinson/data/PRISM/prec.2018.nc','r') as nc:
+        with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
 
-        with Dataset('/home/tdickinson/data/Livneh/prec.1915.nc', 'r') as nc:
+        with Dataset('/share/data1/reanalyses/Livneh/prec.1915.nc', 'r') as nc:
             latLivneh = nc.variables['lat'][:]
             lonLivneh = nc.variables['lon'][:] - 360.
 
@@ -322,7 +322,7 @@ class DateTest(object):
         #interpolate PRISM obs to Livneh grid each day at a time
         tmp = np.zeros((data.shape[0],lonMesh.shape[0],lonMesh.shape[1]))
         for i in range(tmp.shape[0]):
-            tmp[i,:,:] = self._interp(datain=data[i], xin=lonPRISM, yin=latPRISM[::-1],
+            tmp[i,:,:] = self._interp(datain=data[i,:,:], xin=lonPRISM, yin=latPRISM[::-1],
                             xout=lonMesh, yout=latMesh)
         if split:
             self.obs = np.concatenate((firstPiece[:,iY,:][:,:,iX], tmp), axis=0)
@@ -343,19 +343,19 @@ class DateTest(object):
         """
         split = False
         if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
-            beginPath = endPath = '/home/tdickinson/data/Livneh/prec.'
+            beginPath = endPath = '/share/data1/reanalyses/Livneh/prec.'
         elif (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'PRISM'):
-            beginPath = endPath = '/home/tdickinson/data/PRISM/prec.'
+            beginPath = endPath = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
         else:
-            beginPath = '/home/tdickinson/data/Livneh/prec.'
-            endPath = '/home/tdickinson/data/PRISM/prec.'
+            beginPath = '/share/data1/reanalyses/Livneh/prec.'
+            endPath = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
             split = True
 
         #last day in which all days in the window are in the same year
         cutoffDay = datetime.datetime(self.year,12,31) - datetime.timedelta(days=self.length-1)
 
         if cutoffDay > self.DATE_END:
-            with Dataset(beginPath+str(self.year)+'.nc','r') as nc:
+            with Dataset(beginPath+'%d.nc'%(self.year),'r') as nc:
                 #print('Getting observations from %s'%self.year)
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
@@ -376,12 +376,10 @@ class DateTest(object):
             self._time = time[self._locs]
             if self.datasetBegin == 'PRISM':
                 self.interp(data=self.obs[:,::-1,:])
-            else:
-                self.interp(data=self.obs)
 
         else:
             #here, the window goes into the following year so we must load two files
-            with Dataset(beginPath+str(self.DATE_BEGIN.year)+'.nc', 'r') as nc:
+            with Dataset(beginPath+'%d.nc'%(self.DATE_BEGIN.year), 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -394,7 +392,7 @@ class DateTest(object):
                 time1Obs = time1Obs.filled(np.nan)
                 self.units = nc.variables['prec'].units
 
-            with Dataset(endPath+str(self.DATE_END.year)+'.nc', 'r') as nc:
+            with Dataset(beginPath+'%d.nc'%(self.DATE_END.year), 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
@@ -509,10 +507,15 @@ class DateTest(object):
         if np.where(~np.isnan(self.extreme))[0].size == 0:
             self.getExtremePoints()
 
+        kwargs.setdefault('bandwidth', 0.02)
+        kwargs.setdefault('metric', 'haversine')
+        kwargs.setdefault('kernel', 'epanechnikov')
+        kwargs.setdefault('algorithm', 'ball_tree')
+
         x,y = np.meshgrid(self.lon, self.lat)
         locs = np.ma.where(self.extreme == 1)
         if locs[0].size == 0:
-            print('No extreme points')
+            #print('No extreme points')
             self._noPoints = True
             return
         Xtrain = np.zeros((locs[0].size, 2)) * np.nan
@@ -530,15 +533,12 @@ class DateTest(object):
                 Xtrain[i,0] = y[locs[0][i], locs[1][i]]
                 Xtrain[i,1] = x[locs[0][i], locs[1][i]]
 
-        #convert from lat/lon to radians
-        self._XtrainRad = Xtrain * np.pi / 180.
         xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
-        xy *= np.pi / 180.
+        if kwargs['metric'] == 'haversine':
+            #convert from lat/lon to radians
+            self._XtrainRad = Xtrain * np.pi / 180.
+            xy *= np.pi / 180.
 
-        kwargs.setdefault('bandwidth', 0.02)
-        kwargs.setdefault('metric', 'haversine')
-        kwargs.setdefault('kernel', 'epanechnikov')
-        kwargs.setdefault('algorithm', 'ball_tree')
         self.KDE = KernelDensity(**kwargs)
         self.KDE.fit(self._XtrainRad, sample_weight=weighted)
         self.Z = np.exp(self.KDE.score_samples(xy))
@@ -645,9 +645,13 @@ class DateTest(object):
             print('No extreme regions')
             return
         else:
-            daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon})
-            total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
-            diff = xr.DataArray(self.diff, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
+            #add 360 since cartopy returns vertices in [0,360] and I subtracted 360 in constructor
+            daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon+360.})
+            total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
+
+            #define array where only points flagged as extreme are unmasked
+            extremeDiffs = np.ma.masked_array(self.diff, ~self.extreme)
+            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
 
             self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
             self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
@@ -669,6 +673,7 @@ class DateTest(object):
             self.regionsDaily = self.regionsDaily.reshape(p,t*y*x)
             p,y,x = self.regionsTotal.shape
             self.regionsTotal = self.regionsTotal.reshape(p,y*x)
+
             self.regionsDiff = self.regionsDiff.reshape(p,y*x)
 
             """
