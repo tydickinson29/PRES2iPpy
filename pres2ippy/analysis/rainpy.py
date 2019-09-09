@@ -303,7 +303,17 @@ class DateTest(object):
 
     def interp(self, data, split=False, firstPiece=None):
         """Interpolate PRISM grid to Livneh grid in order to correctly compare to extreme thresholds.
+
+        Parameters
+        ----------
+        data : array
+            Array to be interpolated
+        split : boolean
+            If False (default), the time period does not begin in 2011 and end in 2012 (crossover from Livneh to PRISM).
+        firstPiece : NoneType or array
+            Ignore if split is False. If split is True, an array should be given holding Livneh data.
         """
+        
         with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
@@ -533,11 +543,10 @@ class DateTest(object):
                 Xtrain[i,0] = y[locs[0][i], locs[1][i]]
                 Xtrain[i,1] = x[locs[0][i], locs[1][i]]
 
+        #convert from lat/lon to radians
+        self._XtrainRad = Xtrain * np.pi / 180.
         xy = np.vstack((self.kdeGridY.ravel(), self.kdeGridX.ravel())).T
-        if kwargs['metric'] == 'haversine':
-            #convert from lat/lon to radians
-            self._XtrainRad = Xtrain * np.pi / 180.
-            xy *= np.pi / 180.
+        xy *= np.pi / 180.
 
         self.KDE = KernelDensity(**kwargs)
         self.KDE.fit(self._XtrainRad, sample_weight=weighted)
