@@ -313,7 +313,7 @@ class DateTest(object):
         firstPiece : NoneType or array
             Ignore if split is False. If split is True, an array should be given holding Livneh data.
         """
-        
+
         with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
@@ -361,10 +361,7 @@ class DateTest(object):
             endPath = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
             split = True
 
-        #last day in which all days in the window are in the same year
-        cutoffDay = datetime.datetime(self.year,12,31) - datetime.timedelta(days=self.length-1)
-
-        if cutoffDay > self.DATE_END:
+        if self.DATE_BEGIN.year == self.DATE_END.year:
             with Dataset(beginPath+'%d.nc'%(self.year),'r') as nc:
                 #print('Getting observations from %s'%self.year)
                 time = nc.variables['time'][:]
@@ -402,7 +399,7 @@ class DateTest(object):
                 time1Obs = time1Obs.filled(np.nan)
                 self.units = nc.variables['prec'].units
 
-            with Dataset(beginPath+'%d.nc'%(self.DATE_END.year), 'r') as nc:
+            with Dataset(endPath+'%d.nc'%(self.DATE_END.year), 'r') as nc:
                 time = nc.variables['time'][:]
                 timeUnits = nc.variables['time'].units
                 timeCalendar = nc.variables['time'].calendar
