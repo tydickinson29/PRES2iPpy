@@ -20,6 +20,7 @@ except ImportError as e:
     print('%s, will not be able to mask precip obs outside of CONUS.'%e)
     _applyMask = False
 """
+
 class DateTest(object):
     """Make plots of potential 14-day extreme precipitation events and
     see their associated kernel density estimation maps to denote the extreme
@@ -111,7 +112,7 @@ class DateTest(object):
         #to slice intercept, slope for correct length
         with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
             self.lat = nc.variables['lat'][:]
-            self.lon = nc.variables['lon'][:] - 360.
+            self.lon = nc.variables['lon'][:]
             #length = nc.variables['length'][:]
             time = nc.variables['time'][:]
             timeUnits = nc.variables['time'].units
@@ -249,7 +250,7 @@ class DateTest(object):
         shpSlice = shp.loc[shp['NAME'].isin(['UNITED STATES'])]
         test = arr.salem.roi(shape=shpSlice)
         test = test.values
-        return arrToMask
+        return tmp
     """
 
     def _interp(self, datain, xin, yin, xout, yout):
@@ -314,7 +315,7 @@ class DateTest(object):
             Ignore if split is False. If split is True, an array should be given holding Livneh data.
         """
 
-        with Dataset('/share/data1/reanalyses/PRISM/precip/netcdfs/prec.2018.nc','r') as nc:
+        with Dataset('/share/data1/reanalyses/PRISM/daily/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
 
@@ -355,10 +356,10 @@ class DateTest(object):
         if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
             beginPath = endPath = '/share/data1/reanalyses/Livneh/prec.'
         elif (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'PRISM'):
-            beginPath = endPath = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
+            beginPath = endPath = '/share/data1/reanalyses/PRISM/daily/prec.'
         else:
             beginPath = '/share/data1/reanalyses/Livneh/prec.'
-            endPath = '/share/data1/reanalyses/PRISM/precip/netcdfs/prec.'
+            endPath = '/share/data1/reanalyses/PRISM/daily/prec.'
             split = True
 
         if self.DATE_BEGIN.year == self.DATE_END.year:
@@ -422,8 +423,9 @@ class DateTest(object):
             self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
 
         self.total = np.sum(self.obs,axis=0)
-        #self.model = self._mask(self.model)
-        #self.total = self._mask(self.total)
+        #if self.datasetEnd == 'Livneh':
+            #self.model = self._mask(self.model)
+            #self.total = self._mask(self.total)
         self.diff = self.total - self.model
         return
 
@@ -467,14 +469,27 @@ class DateTest(object):
         self.frac = self.frac.reshape(y,x)
         return
 
-    def getExtremePoints(self):
+    def getExtremePoints(self, rainyDays=5, fraction=0.5):
         """Find which points are extreme.
 
         Points must have exceeded the 14-day 95th percentile, have experienced
-        at least 5 days of rainfall at or exceeding 1 mm (0.04 in), and had less
-        than 50% of the total rainfall fall in the day of maximum precipitation and
+        at least rainyDays days of rainfall at or exceeding 1 mm (0.04 in), and had less
+        than fraction of the total rainfall fall in the day of maximum precipitation and
         the 2 surrounding days.
+
+        Parameters
+        ----------
+        rainyDays : int
+            Minimum number of days a point must have experienced 1 mm to be flagged as extreme.
+        fraction : float
+            Maximum fractional 3-day rainfall with respect to 14-day total to be flagged as extreme.
         """
+        fraction = float(fraction)
+        if (type(rainyDays) is not int):
+            raise TypeError('rainyDays must be an int')
+        if (rainyDays < 0) or (rainyDays > self.length):
+            raise ValueError('Number of rainy days must be between 0 and %d'(self.length))
+
         if np.where(~np.isnan(self.diff))[0].size == 0:
             self.getObs()
         if np.where(~np.isnan(self.daysOver2))[0].size == 0:
@@ -482,7 +497,7 @@ class DateTest(object):
         if np.where(~np.isnan(self.frac))[0].size == 0:
             self.check3DayTotals()
 
-        self.extreme = (self.diff >= 0) & (self.daysOver2 >= 5) & (self.frac <= 0.5)
+        self.extreme = (self.diff >= 0) & (self.daysOver2 >= rainyDays) & (self.frac <= fraction)
         return
 
     def kde(self, weighted=False, **kwargs):
@@ -651,13 +666,13 @@ class DateTest(object):
             print('No extreme regions')
             return
         else:
-            #add 360 since cartopy returns vertices in [0,360] and I subtracted 360 in constructor
+            #add 360 since cartopy returns vertices in [0,360] and lons are all negative
             daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon+360.})
             total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
 
             #define array where only points flagged as extreme are unmasked
             extremeDiffs = np.ma.masked_array(self.diff, ~self.extreme)
-            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
+            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
 
             self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
             self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
