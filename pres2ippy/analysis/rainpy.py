@@ -430,111 +430,36 @@ class DateTest(object):
             #self.total = self._mask(self.total)
         self.diff = self.total - self.model
         return
-    '''
-    def checkRainyDays(self):
-        """Calculate the number of days each grid point experienced
-        at least 1 mm (0.04 in) of rainfall for the given 14-day period.
-        """
-        #print('Checking for rainy days')
-        t,y,x = self.obs.shape
-        obs = self.obs.reshape(t,y*x)
 
-        #find the number of times each column goes over 1 mm, then count the bins from 0 to the number of columns
-        self.daysOver2 = np.bincount(np.where(obs >= 1)[1], minlength=obs.shape[1])
-        self.daysOver2 = self.daysOver2.reshape(y,x)
-        return
-
-
-    def checkShortTermTotals(self, numDays):
-        """Check if the day with the maximum precipitation and the two
-        days surrounding it exceed 50% of the total rainfall received in the 14-day
-        period.
-        """
-        validDays = [1,3]
-        if numDays not in validDays:
-            raise ValueError('%s is currently not a supported number. Supported numbers are %s'%(numDays,validDays))
-
-        t,y,x = self.obs.shape
-        obs = self.obs.reshape(t,y*x)
-
-        nonNaN = np.where(~np.isnan(obs[0,:]))[0]
-        tmpTotals = np.zeros((numDays, obs.shape[1]))*np.nan
-        for i in nonNaN:
-            if numDays == 1:
-                tmpTotals[:,i] = np.max(obs[:,i],axis=0)
-            elif numDays == 3:
-                loc = np.argmax(obs[:,i], axis=0)
-                if loc == 0:
-                    #use first 3 values if the max rain is on day 1
-                    tmpTotals[:,i] = obs[:3,i]
-                elif loc == (t-1):
-                    #use last 3 values if the max rain is on day 14; t-2 is the second to last point
-                    tmpTotals[:,i] = obs[-3:,i]
-                else:
-                    tmpTotals[:,i] = obs[loc-1:loc+2,i]
-
-        shortTermTotals = np.nansum(tmpTotals, axis=0)
-        self.frac = shortTermTotals / self.total.reshape(y*x)
-        self.frac = self.frac.reshape(y,x)
-        return
-    '''
     def checkDuration(self):
         """Check if at least half of the period experienced above normal daily precipitation.
         Normal daily precipitation is defined as the mean of all days in the period in the Livneh
         period of record (1915-2011).
         """
-        if np.where(~np.isnan(self.diff))[0].size == 0:
+        if self.diff is None:
             self.getObs()
 
-        totalYears = 96 if (self.DATE_BEGIN.month == 12) and (SELF.DATE_BEGIN.day >= 19) else 97
+        with Dataset('/share/data1/ty/models/means.14.nc','r') as nc:
+            time = nc.variables['time'][:]
+            timeUnits = nc.variables['time'].units
+            timeCalendar = nc.variables['time'].calendar
+            time = num2date(time,timeUnits,timeCalendar)
+            months = np.array([d.month for d in time])
+            days = np.array([d.day for d in time])
+            itime = np.where((months==self.month) & (days==self.day))[0]
+            self.means = nc.variables['mean'][itime,:,:].squeeze()
 
-        path = '/share/data1/reanalyses/Livneh/'
-        files = os.listdir(path)[:-3]
-        files.sort()
-        files = [path+i for i in files]
-
-        nc = MFDataset(files,'r')
-        times = nc.variables['time'][:]
-        timeUnits = nc.variables['time'].units
-        try: timeCalendar = nc.variables['time'].calendar
-        except: timeCalendar = 'standard'
-
-        times = num2date(times,timeUnits,timeCalendar)
-        months = np.array([d.month for d in times])
-        days = np.array([d.day for d in times])
-
-        if self.DATE_BEGIN.month == self.DATE_END.month:
-            locs = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) & ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
-        else:
-            locs = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) | ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
-
-        #check to ensure the correct number of days (i.e., remove leap days or beginning January days in late December start)
-        if locs.size != 14*totalYears:
-            if self.DATE_BEGIN.month == 2:
-                leapDay = np.where((months==2)&(days==29))[0]
-                badLocs = [np.where(locs==i)[0][0] for i in leapDay]
-            else:
-                #discard the Jan. 1915 locs and Dec. 2011 locs
-                daysInDecember = 31 - self.DATE_BEGIN.day + 1
-                daysInJanuary = self.DATE_END.day
-                badLocs = np.append(locs[:daysInJanuary], locs[-daysInDecember:])
-                badLocs = [np.where(locs==i)[0][0] for i in badLocs]
-            locs = np.delete(locs,badLocs)
-
-        hist = nc.variables['prec'][locs,:,:]
-        nc.close()
-        hist = hist.filled(np.nan)
         if self.datasetBegin == 'PRISM':
-            hist = hist[:,self._iY,:][:,:,self._iX]
-        self.means = np.nanmean(hist, axis=0)
+            #adjust slightly for interpolated obs
+            self.means = self.means[self._iY,:][:,self._iX]
 
         t,y,x = self.obs.shape
-        obs = self.obs.reshape(t,y*x)
-        means = self.means.reshape(y*x)
-        nonNaN = np.where(~np.isnan(obs[0,:]))[0]
+        tmpObs = self.obs.reshape(t,y*x)
+        tmpMeans = self.means.reshape(y*x)
+        nonNaN = np.where(~np.isnan(tmpObs[0,:]))[0]
         self.duration = np.zeros(y*x)*np.nan
         for i in nonNaN:
-            self.duration[i] = np.where(obs[:,i] >= means[i])[0].size
+            self.duration[i] = np.where(tmpObs[:,i] >= tmpMeans[i])[0].size
         self.duration = self.duration.reshape(y,x)
         return
 
@@ -544,9 +469,9 @@ class DateTest(object):
         Points must have exceeded the 14-day 95th percentile and experienced at
         least 7 days of above normal daily precipitation.
         """
-        if np.where(~np.isnan(self.diff))[0].size == 0:
+        if self.diff is None:
             self.getObs()
-        if np.where(~np.isnan(self.duration))[0].size == 0:
+        if self.duration is None:
             self.checkDuration()
 
         self.extreme = (self.diff >= 0) & (self.duration >= 7)
@@ -578,7 +503,7 @@ class DateTest(object):
         elif not weighted:
             weighted = None
 
-        if np.where(~np.isnan(self.extreme))[0].size == 0:
+        if self.extreme is None:
             self.getExtremePoints()
 
         kwargs.setdefault('bandwidth', 0.02)
@@ -630,9 +555,9 @@ class DateTest(object):
         """
         if self._noPoints:
             return np.nan
-        elif np.where(~np.isnan(self.Z))[0].size == 0:
+        elif self.density is None:
             self.kde()
-        return np.nanpercentile(a=self.Z, q=perc)
+        return np.nanpercentile(a=self.density, q=perc)
 
     def getContours(self, ticks=None):
         """Method to draw contour for extreme region.
@@ -655,7 +580,7 @@ class DateTest(object):
 
         ax = plt.axes(projection=self._targetProj)
         ax.set_extent([232,294,24,50])
-        self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.Z, levels=levels,
+        self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.density, levels=levels,
                             transform=self._origProj)
 
         self._levels = self._im.levels
@@ -682,7 +607,7 @@ class DateTest(object):
         try:
             getattr(self, '_im')
         except AttributeError:
-            if np.where(~np.isnan(self.Z))[0].size == 0:
+            if self.density is None:
                 self.kde()
             self.getContours()
 
@@ -712,7 +637,7 @@ class DateTest(object):
         import salem
 
         if self._noPoints:
-            self.Z = np.zeros_like(self.kdeGridX)
+            self.density = np.zeros_like(self.kdeGridX)
             return
         elif len(self.polys) == 0:
             print('No extreme regions')
