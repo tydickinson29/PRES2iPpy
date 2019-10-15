@@ -1,5 +1,5 @@
 import numpy as np
-from netCDF4 import Dataset,num2date
+from netCDF4 import MFDataset,Dataset,num2date
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from sklearn.neighbors import KernelDensity
@@ -7,6 +7,7 @@ from sklearn.model_selection import GridSearchCV
 from shapely.geometry import Polygon
 import pandas as pd
 import datetime
+import os
 import warnings
 #import time as t
 warnings.simplefilter("ignore")
@@ -67,17 +68,15 @@ class DateTest(object):
         Total precipitation from the Livneh dataset (i.e., sum at each grid point of ``obs``). Filled after :func:`getObs` is called.
     diff : array, shape (lat, lon)
         Difference between ``obs`` and ``model``. Filled after :func:`getObs` is called.
-    daysOver2 : array, shape (lat, lon)
-        Number of days in the 14-day period that experienced at least 1 mm (0.04 in) of rainfall. Filled after :func:`checkRainyDays` is called.
-    totals3Day : array, shape (lat, lon)
-        3-day rainfall total for the day of maximum precipitation and the two days surrounding for each point in space. Filled after :func:`check3DayTotals` is called.
-    frac : array, shape (lat, lon)
-        Fraction of total rainfall that fell in the 3-day period as specified in ``totals3Day``. Filled after :func:`check3DayTotals` is called.
+    means : array, shape (lat, lon)
+        Daily mean precipitation for window being examined; calculated using Livneh period of record. Filled after :func:`checkDuration` is called.
+    duration : array, shape (lat, lon)
+        Number of days in the window being examined that meet or exceed the daily mean precipitation threshold. Filled after :func:`checkDuration` is called.
     extreme : array, shape (lat, lon)
         True where ``diff`` is positive and ``daysOver2`` is at least 5; False if either condition is not met. Filled after :func:`getExtremePoints` is called.
     KDE: object
         Parameters being used in scikit-learn's `KernelDensity <https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KernelDensity.html#sklearn.neighbors.KernelDensity>`_ class.
-    Z : array, shape (kdeGridX, kdeGridY)
+    density : array, shape (kdeGridX, kdeGridY)
         Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
     polys : list
         List of Shapely `Polygon <https://shapely.readthedocs.io/en/stable/manual.html#polygons>`_s describing the extreme region(s). Filled after :func:`getAreas` is called.
@@ -134,16 +133,21 @@ class DateTest(object):
         gridLons = np.arange(232, 294.1, 0.1)
         self.kdeGridX, self.kdeGridY = np.meshgrid(gridLons, gridLats)
 
-        self.obs = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.total = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.diff = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.daysOver2 = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.frac = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.extreme = np.zeros((self.lat.size, self.lon.size)) * np.nan
-        self.Z = np.zeros_like(self.kdeGridX) * np.nan
+        self.obs = None
+        self.units = ''
+        self.total = None
+        self.diff = None
+        self.means = None
+        self.duration = None
+        self.extreme = None
+        self.density = None
         self.areas = {}
         self.polys = []
         self._noPoints = False
+        self.regionsDaily = None
+        self.regionsTotal = None
+        self.regionsDiff = None
+        self.weightedTotal = None
 
     def __repr__(self):
         return 'DateTest(month=%s, day=%s, year=%s)'%(self.month, self.day, self.year)
@@ -197,7 +201,6 @@ class DateTest(object):
         else:
             self.__year = val
 
-    '''
     @property
     def length(self):
         """Get or set the length of the window being considered.
@@ -211,7 +214,6 @@ class DateTest(object):
             raise ValueError('%s is currently not a supported length.'%(val))
         else:
             self.__length = val
-    '''
 
     @property
     def DATE_BEGIN(self):
@@ -323,12 +325,12 @@ class DateTest(object):
             latLivneh = nc.variables['lat'][:]
             lonLivneh = nc.variables['lon'][:] - 360.
 
-        iX = np.where((lonLivneh >= lonPRISM.min()) & (lonLivneh <= lonPRISM.max()))[0]
-        iY = np.where((latLivneh >= latPRISM.min()) & (latLivneh <= latPRISM.max()))[0]
+        self._iX = np.where((lonLivneh >= lonPRISM.min()) & (lonLivneh <= lonPRISM.max()))[0]
+        self._iY = np.where((latLivneh >= latPRISM.min()) & (latLivneh <= latPRISM.max()))[0]
         #Adjust lats and lons to new interpolated grid (N-S bounds slightly less)
-        self.lat = latLivneh[iY]
-        self.lon = lonLivneh[iX]
-        lonMesh,latMesh = np.meshgrid(lonLivneh[iX],latLivneh[iY])
+        self.lat = latLivneh[self._iY]
+        self.lon = lonLivneh[self._iX]
+        lonMesh,latMesh = np.meshgrid(lonLivneh[self._iX],latLivneh[self._iY])
 
         #interpolate PRISM obs to Livneh grid each day at a time
         tmp = np.zeros((data.shape[0],lonMesh.shape[0],lonMesh.shape[1]))
@@ -336,11 +338,11 @@ class DateTest(object):
             tmp[i,:,:] = self._interp(datain=data[i,:,:], xin=lonPRISM, yin=latPRISM[::-1],
                             xout=lonMesh, yout=latMesh)
         if split:
-            self.obs = np.concatenate((firstPiece[:,iY,:][:,:,iX], tmp), axis=0)
+            self.obs = np.concatenate((firstPiece[:,self._iY,:][:,:,self._iX], tmp), axis=0)
         else:
             self.obs = tmp
         #adjust model to new grid
-        self.model = self.model[iY,:][:,iX]
+        self.model = self.model[self._iY,:][:,self._iX]
         return
 
     def getObs(self):
@@ -428,7 +430,7 @@ class DateTest(object):
             #self.total = self._mask(self.total)
         self.diff = self.total - self.model
         return
-
+    '''
     def checkRainyDays(self):
         """Calculate the number of days each grid point experienced
         at least 1 mm (0.04 in) of rainfall for the given 14-day period.
@@ -442,62 +444,112 @@ class DateTest(object):
         self.daysOver2 = self.daysOver2.reshape(y,x)
         return
 
-    def check3DayTotals(self):
+
+    def checkShortTermTotals(self, numDays):
         """Check if the day with the maximum precipitation and the two
         days surrounding it exceed 50% of the total rainfall received in the 14-day
         period.
         """
-        #print('Checking 3-day totals around day of maximum')
+        validDays = [1,3]
+        if numDays not in validDays:
+            raise ValueError('%s is currently not a supported number. Supported numbers are %s'%(numDays,validDays))
+
         t,y,x = self.obs.shape
         obs = self.obs.reshape(t,y*x)
 
         nonNaN = np.where(~np.isnan(obs[0,:]))[0]
-        tmpTotals3Day = np.zeros((3, obs.shape[1]))*np.nan
+        tmpTotals = np.zeros((numDays, obs.shape[1]))*np.nan
         for i in nonNaN:
-            loc = np.argmax(obs[:,i], axis=0)
-            if loc == 0:
-                #use first 3 values if the max rain is on day 1
-                tmpTotals3Day[:,i] = obs[:3,i]
-            elif loc == (t-1):
-                #use last 3 values if the max rain is on day 14; t-2 is the second to last point
-                tmpTotals3Day[:,i] = obs[-3:,i]
-            else:
-                tmpTotals3Day[:,i] = obs[loc-1:loc+2,i]
+            if numDays == 1:
+                tmpTotals[:,i] = np.max(obs[:,i],axis=0)
+            elif numDays == 3:
+                loc = np.argmax(obs[:,i], axis=0)
+                if loc == 0:
+                    #use first 3 values if the max rain is on day 1
+                    tmpTotals[:,i] = obs[:3,i]
+                elif loc == (t-1):
+                    #use last 3 values if the max rain is on day 14; t-2 is the second to last point
+                    tmpTotals[:,i] = obs[-3:,i]
+                else:
+                    tmpTotals[:,i] = obs[loc-1:loc+2,i]
 
-        self.totals3Day = np.nansum(tmpTotals3Day, axis=0)
-        self.frac = self.totals3Day / self.total.reshape(y*x)
+        shortTermTotals = np.nansum(tmpTotals, axis=0)
+        self.frac = shortTermTotals / self.total.reshape(y*x)
         self.frac = self.frac.reshape(y,x)
         return
-
-    def getExtremePoints(self, rainyDays=5, fraction=0.5):
-        """Find which points are extreme.
-
-        Points must have exceeded the 14-day 95th percentile, have experienced
-        at least rainyDays days of rainfall at or exceeding 1 mm (0.04 in), and had less
-        than fraction of the total rainfall fall in the day of maximum precipitation and
-        the 2 surrounding days.
-
-        Parameters
-        ----------
-        rainyDays : int
-            Minimum number of days a point must have experienced 1 mm to be flagged as extreme.
-        fraction : float
-            Maximum fractional 3-day rainfall with respect to 14-day total to be flagged as extreme.
+    '''
+    def checkDuration(self):
+        """Check if at least half of the period experienced above normal daily precipitation.
+        Normal daily precipitation is defined as the mean of all days in the period in the Livneh
+        period of record (1915-2011).
         """
-        fraction = float(fraction)
-        if (type(rainyDays) is not int):
-            raise TypeError('rainyDays must be an int')
-        if (rainyDays < 0) or (rainyDays > self.length):
-            raise ValueError('Number of rainy days must be between 0 and %d'(self.length))
-
         if np.where(~np.isnan(self.diff))[0].size == 0:
             self.getObs()
-        if np.where(~np.isnan(self.daysOver2))[0].size == 0:
-            self.checkRainyDays()
-        if np.where(~np.isnan(self.frac))[0].size == 0:
-            self.check3DayTotals()
 
-        self.extreme = (self.diff >= 0) & (self.daysOver2 >= rainyDays) & (self.frac <= fraction)
+        totalYears = 96 if (self.DATE_BEGIN.month == 12) and (SELF.DATE_BEGIN.day >= 19) else 97
+
+        path = '/share/data1/reanalyses/Livneh/'
+        files = os.listdir(path)[:-3]
+        files.sort()
+        files = [path+i for i in files]
+
+        nc = MFDataset(files,'r')
+        times = nc.variables['time'][:]
+        timeUnits = nc.variables['time'].units
+        try: timeCalendar = nc.variables['time'].calendar
+        except: timeCalendar = 'standard'
+
+        times = num2date(times,timeUnits,timeCalendar)
+        months = np.array([d.month for d in times])
+        days = np.array([d.day for d in times])
+
+        if self.DATE_BEGIN.month == self.DATE_END.month:
+            locs = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) & ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
+        else:
+            locs = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) | ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
+
+        #check to ensure the correct number of days (i.e., remove leap days or beginning January days in late December start)
+        if locs.size != 14*totalYears:
+            if self.DATE_BEGIN.month == 2:
+                leapDay = np.where((months==2)&(days==29))[0]
+                badLocs = [np.where(locs==i)[0][0] for i in leapDay]
+            else:
+                #discard the Jan. 1915 locs and Dec. 2011 locs
+                daysInDecember = 31 - self.DATE_BEGIN.day + 1
+                daysInJanuary = self.DATE_END.day
+                badLocs = np.append(locs[:daysInJanuary], locs[-daysInDecember:])
+                badLocs = [np.where(locs==i)[0][0] for i in badLocs]
+            locs = np.delete(locs,badLocs)
+
+        hist = nc.variables['prec'][locs,:,:]
+        nc.close()
+        hist = hist.filled(np.nan)
+        if self.datasetBegin == 'PRISM':
+            hist = hist[:,self._iY,:][:,:,self._iX]
+        self.means = np.nanmean(hist, axis=0)
+
+        t,y,x = self.obs.shape
+        obs = self.obs.reshape(t,y*x)
+        means = self.means.reshape(y*x)
+        nonNaN = np.where(~np.isnan(obs[0,:]))[0]
+        self.duration = np.zeros(y*x)*np.nan
+        for i in nonNaN:
+            self.duration[i] = np.where(obs[:,i] >= means[i])[0].size
+        self.duration = self.duration.reshape(y,x)
+        return
+
+    def getExtremePoints(self):
+        """Find which points are extreme.
+
+        Points must have exceeded the 14-day 95th percentile and experienced at
+        least 7 days of above normal daily precipitation.
+        """
+        if np.where(~np.isnan(self.diff))[0].size == 0:
+            self.getObs()
+        if np.where(~np.isnan(self.duration))[0].size == 0:
+            self.checkDuration()
+
+        self.extreme = (self.diff >= 0) & (self.duration >= 7)
         return
 
     def kde(self, weighted=False, **kwargs):
@@ -562,10 +614,10 @@ class DateTest(object):
 
         self.KDE = KernelDensity(**kwargs)
         self.KDE.fit(self._XtrainRad, sample_weight=weighted)
-        self.Z = np.exp(self.KDE.score_samples(xy))
+        self.density = np.exp(self.KDE.score_samples(xy))
         #divide by max to normalize density field
-        self.Z = self.Z / np.nanmax(self.Z)
-        self.Z = self.Z.reshape(self.kdeGridX.shape)
+        self.density = self.density / np.nanmax(self.density)
+        self.density = self.density.reshape(self.kdeGridX.shape)
         return
 
     def calcKDEPercentile(self, perc=95):
@@ -672,7 +724,7 @@ class DateTest(object):
 
             #define array where only points flagged as extreme are unmasked
             extremeDiffs = np.ma.masked_array(self.diff, ~self.extreme)
-            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon})
+            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
 
             self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
             self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
