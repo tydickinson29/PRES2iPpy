@@ -449,7 +449,7 @@ class DateTest(object):
             itime = np.where((months==self.month) & (days==self.day))[0]
             self.means = nc.variables['mean'][itime,:,:].squeeze()
 
-        if self.datasetBegin == 'PRISM':
+        if self.datasetEnd == 'PRISM':
             #adjust slightly for interpolated obs
             self.means = self.means[self._iY,:][:,self._iX]
 
@@ -516,6 +516,7 @@ class DateTest(object):
         if locs[0].size == 0:
             #print('No extreme points')
             self._noPoints = True
+            self.density = np.zeros_like(self.kdeGridX)
             return
         Xtrain = np.zeros((locs[0].size, 2)) * np.nan
 
