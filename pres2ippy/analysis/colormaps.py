@@ -1,14 +1,13 @@
 from matplotlib import cm, colors
 import numpy as np
 
-def rainfall(kind):
+def rainfall(kind, bounds=np.linspace(0,600,17)):
     if kind == 'greg':
-        bounds = np.linspace(0,600,17)
         my_colors = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
                 'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
         my_cmap = colors.ListedColormap(my_colors)
         my_cmap.set_over('gainsboro')
-        norm = colors.BoundaryNorm(bounds, cmap.N)
+        norm = colors.BoundaryNorm(bounds, my_cmap.N)
 
     elif kind == 'prism':
         bounds = [0,0.01,0.1,0.2,0.4,0.6,0.8,1.2,1.6,2,2.4,2.8,3.2,4,5,6,8,12,16,20]
@@ -19,6 +18,38 @@ def rainfall(kind):
                         '#ffaeff']
         my_cmap = colors.ListedColormap(my_colors)
         my_cmap.set_over('#ffd0ff')
+        norm = colors.BoundaryNorm(bounds, my_cmap.N)
+
+    elif kind == 'ty':
+        bounds = np.arange(0,601,25)
+        my_colors = [
+            'white', #0 -> 25
+            'azure', #25 -> 50
+            'paleturquoise', #50 -> 75
+            'cornflowerblue', #75 -> 100
+            'royalblue', #100 -> 125
+            'blue', #125 -> 150
+            'teal', #150 -> 175
+            'forestgreen', #175 -> 200
+            'green', #200 -> 225
+            'yellow', #225 -> 250
+            'gold', #250 -> 275
+            'orange', #275 -> 300
+            'darkorange', #300 -> 325
+            'orangered', #325 -> 350
+            'red', #350 -> 375
+            'crimson', #375 -> 400
+            'darkred', #400 -> 425
+            'fuchsia', #425 -> 450
+            'orchid', #450 -> 475
+            'darkmagenta', #475 -> 500
+            'indigo', #500 -> 525
+            'black', #525 -> 550
+            'grey', #550 -> 575
+            'darkgray', #575 -> 600
+            ]
+        my_cmap = colors.ListedColormap(my_colors)
+        my_cmap.set_over('lightgray')
         norm = colors.BoundaryNorm(bounds, my_cmap.N)
 
     elif kind == 'custom':
@@ -66,34 +97,20 @@ def rainfall(kind):
         my_cmap = colors.ListedColormap(my_colors)
         my_cmap.set_over(over)
         norm = colors.BoundaryNorm(bounds, my_cmap.N)
-        
+
     return bounds, my_cmap, norm
 
-def slopes():
+def slopes(ends, ticks):
     cmap = cm.get_cmap('BrBG')
-    my_colors = [
-        cmap(1./20), #-1 to -0.9
-        cmap(2./20), #-0.9 to -0.8
-        cmap(3./20), #-0.8 to -0.7
-        cmap(4./20), #-0.7 to -0.6
-        cmap(5./20), #-0.6 to -0.5
-        cmap(6./20), #-0.5 to -0.4
-        cmap(7./20), #-0.4 to -0.3
-        cmap(8./20), #-0.3 to -0.2
-        cmap(9./20), #-0.2 to -0.1
-        'white', #-0.1 to 0
-        'white', #0 to 0.1
-        cmap(11./20), #0.1 to 0.2
-        cmap(12./20), #0.2 to 0.3
-        cmap(13./20), #0.3 to 0.4
-        cmap(14./20), #0.4 to 0.5
-        cmap(15./20), #0.5 to 0.6
-        cmap(16./20), #0.6 to 0.7
-        cmap(17./20), #0.7 to 0.8
-        cmap(18./20), #0.8 to 0.9
-        cmap(19./20) #0.9 to 1.0
-    ]
-    bounds = np.arange(-1,1.1,0.1)
+    bounds = np.arange(ends[0], ends[-1]+ticks, ticks)
+    numColors = bounds.size - 1
+    my_colors = []
+    for i in range(1,numColors+1):
+        if (i != (numColors / 2.)):
+            my_colors.append(cmap(i/float(numColors)))
+        else:
+            my_colors.extend(['white']*2)
+
     my_cmap = colors.ListedColormap(my_colors)
     my_cmap.set_under(cmap(0.0))
     my_cmap.set_over(cmap(1.0))
