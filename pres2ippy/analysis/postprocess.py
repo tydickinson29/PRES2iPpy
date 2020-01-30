@@ -1,76 +1,84 @@
 import numpy as np
 import pandas as pd
-import geopandas
 import shapely.wkt
+import geopandas
+import glob
 
-def haversine(lon1, lat1, lon2, lat2):
-    """Calculate the great circle distance between two points on Earth"""
-
-    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
-
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = np.sin(dlat/2.)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-    r = 6371 #radius of Earth in km
-    return c*r
-
-def groupEvents(df, globalCounter):
-    global SEARCHING
-    localCounter = 1
-    try:
-        targetRow = df.iloc[globalCounter]
-    except IndexError: #signals end of dataframe
-        SEARCHING = False
-        return
-
-    goodLocs = [globalCounter]
-    currentDate = targetRow.Begin_Date
-    while True:
-        try:
-            imon = df.iloc[globalCounter + localCounter]
-        except IndexError:
-            break
-
-        if (imon.Begin_Date - currentDate).days == 0:
-            localCounter += 1
-            continue
-        elif (imon.Begin_Date - currentDate).days > 1:
-            break
-        else:
-            dist = haversine(lon1=targetRow.Centroid_Lon, lat1=targetRow.Centroid_Lat,
-                             lon2=imon.Centroid_Lon, lat2=imon.Centroid_Lat)
-            if dist <= 650:
-                #keep event if within 1 day and within 650 km
-                goodLocs.append(globalCounter + localCounter)
-                localCounter += 1
-                currentDate = imon.Begin_Date
-            else:
-                if imon.Begin_Date == df.iloc[globalCounter + localCounter + 1].Begin_Date:
-                    localCounter += 1
-                    continue
-                else:
-                    break
-    return goodLocs
-
-df = pd.read_csv('database.1915.csv')
+files = glob.glob('/share/data1/ty/database/*.csv')
+df = pd.concat([pd.read_csv(i) for i in files])
+df = df[df.Area >= 200000]
 df = df.astype({'Begin_Date':'datetime64[ns]', 'End_Date':'datetime64[ns]'})
-SEARCHING = True
+df = df.sort_values('Begin_Date')
+df.reset_index(drop=True, inplace=True)
+events = []
 
-for imon in range(len(df)):
-    goodLocs = groupEvents(df, globalCounter=imon)
-    if SEARCHING:
-        subset = df.iloc[goodLocs]
-        #drop all events except that with largest total over extreme
-        oneToChoose = subset['Total_Over_Extreme'].idxmax()
-        goodLocs.remove(oneToChoose)
-        df.drop(goodLocs, inplace=True)
-        df.reset_index(drop=True, inplace=True)
-    else:
-        break
+def findEvent(df):
+    """Group events based on first row in preprocessed dataframe. All events that start on or
+    before the ending date of the event in the first row are initially considered. Then, events
+    are grouped if the interesting area is 50% of either intersectand area. Returns the chosen
+    event and the indices of grouped events.
+    """
+    polys = [shapely.wkt.loads(i) for i in df.geometry]
 
-#convert to shapefile
-df = df.astype({'Begin_Date':str,'End_Date':str})
-polys = [shapely.wkt.loads(i) for i in df.geometry]
-gdf = geopandas.GeoDataFrame(df, geometry=polys)
-gdf.to_file('test.shp')
+    #create symmetrical matrix of all intersections in first subset
+    intersection = [[i.intersection(j) for j in polys] for i in polys]
+
+    #find fractions relative to both events making intersection; no intersection gives 0
+    #rows are relative to one event, columns relative to the other
+    fracAreas = np.array([[j.area / polys[i].area for j in intersection[i]] for i in range(len(intersection))])
+
+    #find all polygons that group with the first event then find all polygons that group with all those events
+    tmpSim = np.where((fracAreas[0,:] >= 0.5) | (fracAreas[:,0] >= 0.5))[0]
+    indices = []
+    for i in tmpSim:
+        indices.append(np.where((fracAreas[i,:] >= 0.5) | (fracAreas[:,i] >= 0.5))[0])
+
+    indices = np.unique(np.concatenate(indices))
+    similarEvents = df.iloc[indices]
+    similarEvents.reset_index(drop=True, inplace=True)
+    event = similarEvents.iloc[similarEvents['Total_Over_Extreme'].idxmax]
+    return event, indices
+
+while len(df) != 0:
+    tmpEvents = []
+    tmpIndices = []
+    tmpDFs = []
+    #find first event
+    localDF = df.iloc[np.where((df.iloc[0].Begin_Date <= df.Begin_Date) & (df.iloc[0].End_Date >= df.Begin_Date))]
+    output = findEvent(localDF)
+    tmpEvents.append(output[0])
+    tmpIndices.append(output[1])
+    tmpDFs.append(localDF.iloc[tmpIndices[0]])
+
+    #find next event(s); repeat until convergence
+    localCounter = 0
+    while True:
+        localDF = df.iloc[np.where((tmpEvents[localCounter].Begin_Date <= df.Begin_Date) & (tmpEvents[localCounter].End_Date >= df.Begin_Date))]
+        #sort to ensure that previously identified event is in first row
+        localDF = localDF.sort_values(by=['Begin_Date','Total_Over_Extreme'], ascending=[True,False])
+        output = findEvent(localDF)
+        tmpEvents.append(output[0])
+        tmpIndices.append(output[1])
+        tmpDFs.append(localDF.iloc[tmpIndices[localCounter+1]])
+        if tmpEvents[localCounter].equals(tmpEvents[localCounter+1]):
+            break
+        localCounter += 1
+
+    allEvents = pd.concat(tmpDFs)
+    allEvents.drop_duplicates(inplace=True)
+    events.append(tmpEvents[localCounter])
+    df.drop(allEvents.index.tolist(), inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    print(len(df))
+
+
+events = pd.DataFrame(events)
+events = events.sort_values(by='Begin_Date')
+events.drop_duplicates(inplace=True)
+events.reset_index(drop=True, inplace=True)
+polys = [shapely.wkt.loads(i) for i in events.geometry]
+events.to_csv('/share/data1/ty/database/database_v1.0.csv', index=False)
+
+events = events.astype({'Begin_Date':str, 'End_Date':str})
+gdf = geopandas.GeoDataFrame(events, geometry=polys)
+gdf.to_file('/share/data1/ty/database/database_v1.0.shp')
