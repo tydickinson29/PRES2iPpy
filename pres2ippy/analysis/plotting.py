@@ -45,7 +45,7 @@ def plotSlopes(obj, endpoints, ticks):
     return
 '''
 def plotRainyDays(obj, **kwargs):
-    """Plot the number of days that experienced at least 1 mm (0.04 in) of rainfall
+    """Plot the number of days that experienced at least 1 mm (0.04 in) of precipitation
     for the given 14-day period.
 
     Parameters
@@ -73,7 +73,7 @@ def plotRainyDays(obj, **kwargs):
     return
 
 def plotShortTermTotals(obj, **kwargs):
-    """Plot the fraction of rainfall that fell on the day of maximum precipitation
+    """Plot the fraction of precipitation that fell on the day of maximum precipitation
     and the two days surrounding.
 
     Uses the first 3 days if the day of the maximum was day 1 of the event; uses
@@ -120,6 +120,7 @@ def plotDuration(obj, **kwargs):
         obj.checkDuration()
 
     kwargs.setdefault('levels', np.arange(0,15,1))
+    kwargs.setdefault('cmap', 'GnBu')
 
     x,y = np.meshgrid(obj.lon,obj.lat)
     fig = plt.figure(figsize=(8,6))
@@ -130,8 +131,10 @@ def plotDuration(obj, **kwargs):
     m.drawcountries()
     m.drawstates()
     im = m.contourf(x, y, obj.duration, latlon=True, **kwargs)
+    #FIXME: check obj to pull out number of duration days
+    m.contour(x, y, obj.duration, latlon=True, levels=[7], colors='k')
     m.colorbar(im, 'bottom')
-    plt.title('%d/%d - %d/%d Number of Days Above Daily Mean Rainfall'
+    plt.title('%d/%d - %d/%d Number of Days Above Daily Mean Precipitation'
         %(obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_END.month,obj.DATE_END.day))
     plt.tight_layout()
     plt.show(block=False)
@@ -140,10 +143,10 @@ def plotExtremePoints(obj):
     """Plot the points that are labeled as extreme.
 
     Extreme points are colored green while non-extreme points are colored white.
-    A point is labeled as extreme if its 14-day total rainfall exceeded the 95th
-    percentile, it experienced at least 5 days of rainfall of at least 1 mm (0.04 in),
+    A point is labeled as extreme if its 14-day total precipitation exceeded the 95th
+    percentile, it experienced at least 5 days of precipitation of at least 1 mm (0.04 in),
     and it did not have more than 50% of the total precipitation fall on the day
-    of maximum rainfall and the surrounding 2 days.
+    of maximum precipitation and the surrounding 2 days.
 
     Parameters
     ----------
@@ -190,10 +193,10 @@ def area(im):
 def makePlot(obj, filled=True, cmapRain='greg', save=False, **kwargs):
     """Make 3- or 4-panel plot based on instance attributes.
 
-    Top left panel will always be the rainfall given by the Livneh dataset.
+    Top left panel will always be the precipitation given by the Livneh dataset.
     Top right panel will always be the thresholds for extreme given by the quantile
     regression model. Bottom left panel will always be the difference, with green shading
-    where there was extreme rainfall and white otherwise. Bottom right panel is an optional panel,
+    where there was extreme precipitation and white otherwise. Bottom right panel is an optional panel,
     being the KDE smoothed map.
 
     Parameters
@@ -219,7 +222,7 @@ def makePlot(obj, filled=True, cmapRain='greg', save=False, **kwargs):
         raise InputError('%s is not a current option. Options are %s'%(cmapRain,cmapOptions))
 
     x,y = np.meshgrid(obj.lon,obj.lat)
-    boundsPrecip, cmapPrecip, normPrecip = colormaps.rainfall(kind=cmapRain.lower())
+    boundsPrecip, cmapPrecip, normPrecip = colormaps.precipitation(kind=cmapRain.lower())
 
     fig = plt.figure(figsize=(13,10))
     for plot_num, contour in enumerate([obj.total,obj.model,obj.extreme]):
@@ -298,7 +301,7 @@ def plotObsAndRegion(obj, level, cmap='greg'):
         raise InputError('%s is not a current option. Options are %s'%(cmap,cmapOptions))
 
     x,y = np.meshgrid(obj.lon,obj.lat)
-    boundsPrecip, cmapPrecip, normPrecip = colormaps.rainfall(kind=cmap.lower())
+    boundsPrecip, cmapPrecip, normPrecip = colormaps.precipitation(kind=cmap.lower())
 
     fig = plt.figure(figsize=(8,6))
     m = Basemap(projection='aea',resolution='l',
@@ -319,7 +322,7 @@ def plotObsAndRegion(obj, level, cmap='greg'):
 
 def plotObsEvolution(obj,cmap='greg'):
     x,y = np.meshgrid(obj.lon, obj.lat)
-    boundsPrecip, cmapPrecip, normPrecip = colormaps.rainfall(kind=cmap.lower(), bounds=np.linspace(0,400,17))
+    boundsPrecip, cmapPrecip, normPrecip = colormaps.precipitation(kind=cmap.lower(), bounds=np.linspace(0,160,17))
 
     fig = plt.figure(figsize=(15,7))
     for i in range(obj.length):
@@ -334,6 +337,10 @@ def plotObsEvolution(obj,cmap='greg'):
         im = m.contourf(x,y,obj.obs[i,:,:],levels=boundsPrecip,cmap=cmapPrecip,norm=normPrecip,extend='max',latlon=True)
         plt.title('%d/%d/%d'%(date.month, date.day, date.year))
 
+    ax = fig.add_subplot(3,5,15)
+    ax.set_axis_off()
+    cbar = fig.colorbar(im, orientation='horizontal', ax=ax)
+    cbar.set_label('mm')
     plt.tight_layout()
     plt.show(block=False)
     return
