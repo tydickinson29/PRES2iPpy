@@ -1,7 +1,7 @@
 from matplotlib import cm, colors
 import numpy as np
 
-def rainfall(kind, bounds=np.linspace(0,600,17)):
+def precipitation(kind, bounds=np.linspace(0,600,17)):
     if kind == 'greg':
         my_colors = ['w','cornflowerblue','b','teal','g','yellow','gold','orange',
                 'darkorange','r','crimson','darkred','k','grey','darkgrey','lightgray']
