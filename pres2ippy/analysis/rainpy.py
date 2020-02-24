@@ -23,9 +23,8 @@ except ImportError as e:
 """
 
 class DateTest(object):
-    """Make plots of potential 14-day extreme precipitation events and
-    see their associated kernel density estimation maps to denote the extreme
-    region.
+    """Test an input date between January 1, 1915 and December 31, 2018 to see
+    if an S2S extreme event occurred.
 
     Parameters
     ----------
@@ -60,7 +59,7 @@ class DateTest(object):
         Longitude grid the kernel density estimation is evaluated onto. Range is [128W, 66W] every 1/10th of a degree.
     kdeGridY : array, shape (261, 622)
         Latitude grid the kernel density estimation is evaluated onto. Range is [24N, 50N] every 1/10th of a degree.
-    obs : array, shape (lat, lon)
+    obs : array, shape (length, lat, lon)
         Recorded precipitation each day from the Livneh dataset for the input 14-day period. Filled after :func:`getObs` is called.
     units : string
         Units of any precipitation measurement or statistic unless otherwise noted. Filled after :func:`getObs` is called.
@@ -79,7 +78,7 @@ class DateTest(object):
     density : array, shape (kdeGridX, kdeGridY)
         Density (height in the vertical coordinate) obtained from the KDE analysis. Filled after :func:`kde` is called.
     polys : list
-        List of Shapely `Polygon <https://shapely.readthedocs.io/en/stable/manual.html#polygons>`_s describing the extreme region(s). Filled after :func:`getAreas` is called.
+        List of Shapely `Polygon <https://shapely.readthedocs.io/en/stable/manual.html#polygons>`_ s describing the extreme region(s). Filled after :func:`getAreas` is called.
     areas : dict
         Areas of KDE (:func:`kde`) contours drawn in square kilometers. Filled after :func:`getAreas` is called.
     regionsDaily : array, shape (numRegions, length*lat*lon)
@@ -90,6 +89,8 @@ class DateTest(object):
         Event totals over extreme threshold for all positive points inside region.
     weightedTotal : array, shape (numRegions)
         Areal-averaged precipitation for all points inside extreme region.
+    numPoints : int
+        Number of grid points inside each bounded KDE region.
     """
 
     #global _applyMask
@@ -109,7 +110,7 @@ class DateTest(object):
         #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
         #with lengths 14, 30, 60, and 90. Take additional argument in constructor
         #to slice intercept, slope for correct length
-        with Dataset('/share/data1/ty/models/quantReg.95.14.nc','r') as nc:
+        with Dataset('/share/data1/Students/ty/models/quantReg.95.14.nc','r') as nc:
             self.lat = nc.variables['lat'][:]
             self.lon = nc.variables['lon'][:]
             #length = nc.variables['length'][:]
@@ -148,6 +149,7 @@ class DateTest(object):
         self.regionsTotal = None
         self.regionsDiff = None
         self.weightedTotal = None
+        self.numPoints = None
 
     def __repr__(self):
         return 'DateTest(month=%s, day=%s, year=%s)'%(self.month, self.day, self.year)
@@ -248,7 +250,7 @@ class DateTest(object):
         arr = xr.DataArray(arrToMask, dims=['lat','lon'],
                 coords={'lat':self.lat,'lon':self.lon})
 
-        shp = salem.read_shapefile('/share/data1/ty/NA_shapefile/North_America.shp')
+        shp = salem.read_shapefile('/share/data1/Students/ty/NA_shapefile/North_America.shp')
         shpSlice = shp.loc[shp['NAME'].isin(['UNITED STATES'])]
         test = arr.salem.roi(shape=shpSlice)
         test = test.values
@@ -346,7 +348,7 @@ class DateTest(object):
         return
 
     def getObs(self):
-        """Retrive Livneh reanalyses from the year specified by the object.
+        """Retrive Livneh or PRISM data from the year specified by the object.
 
         Creates the observations and difference attributes for the instance. Observations
         are from Livneh and the difference is the observation amounts minus the amount given
@@ -439,7 +441,7 @@ class DateTest(object):
         if self.diff is None:
             self.getObs()
 
-        with Dataset('/share/data1/ty/models/means.14.nc','r') as nc:
+        with Dataset('/share/data1/Students/ty/models/means.14.nc','r') as nc:
             time = nc.variables['time'][:]
             timeUnits = nc.variables['time'].units
             timeCalendar = nc.variables['time'].calendar
@@ -590,17 +592,20 @@ class DateTest(object):
     def _coordTransform(self, x, y):
         return self._targetProj.transform_points(self._origProj, x, y)
 
-    def calcAreas(self):
+    def calcAreas(self, areaThreshold):
         """Calculate the area of the polygons in the KDE map shown by :func:`getContours`.
 
         The vertices are gathered from the objected returned by matplotlib's
         `contour <https://matplotlib.org/api/_as_gen/matplotlib.pyplot.contour.html>`_
         method and the area is calculated using Green's Theorem. Requires the :func:`getContours` method
         to have been called since it requires vertices to describe the polygon that we are
-        finding the area of!
+        finding the area of. Areas for each contour are stored in a dictionary and assigned as an
+        instance attribute with units of squared kilometers.
 
-        Areas for each contour are stored in a dictionary and assigned as an instance attribute
-        with units of squared kilometers.
+        Parameters
+        ----------
+        areaThreshold : int or float
+            Areal threshold to consider a region an extreme event
         """
         if self._noPoints:
             return
@@ -622,17 +627,20 @@ class DateTest(object):
                 a = 0.5*np.sum(y[:-1]*np.diff(x) - x[:-1]*np.diff(y))
                 a = np.abs(a) / (1000.**2)
                 areas.append(a)
-                if a >= 100000.:
+                if a >= areaThreshold:
                     self.polys.append(Polygon([(j[0], j[1]) for j in zip(region.vertices[:,0],region.vertices[:,1])]))
             self.areas[self._levels[i]] = areas
+
+        #FIXME: fill Polygons with small holes inside
         return
 
     def maskOutsideRegion(self):
         """Set all points outside extreme region to NaN.
 
         Additionally, arrays are created to find areal-averaged precipitation,
-        maximum 1-day and 14-day precipitation, and the total precipitation over
-        the extreme threshold in the extreme region.
+        maximum 1-day and 14-day precipitation, the total precipitation over
+        the extreme threshold in the extreme region, and the number of grid points
+        inside the region.
         """
         import xarray as xr
         import salem
@@ -644,6 +652,9 @@ class DateTest(object):
             print('No extreme regions')
             return
         else:
+            numRegions = len(self.polys)
+
+            #first, make xarrays for daily and 14-day precipitation
             #add 360 since cartopy returns vertices in [0,360] and lons are all negative
             daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon+360.})
             total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
@@ -652,13 +663,20 @@ class DateTest(object):
             extremeDiffs = np.ma.masked_array(self.diff, ~self.extreme)
             diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
 
+            #get array of ones with shape of kde grid and repeat numRegions times
+            regions = np.ones_like(self.kdeGridX)
+            regions = np.tile(regions, (numRegions,1)).reshape(numRegions,self.kdeGridX.shape[0],self.kdeGridX.shape[1])
+
             self.regionsDaily = np.zeros((len(self.polys), daily.shape[0], self.lat.size, self.lon.size)) * np.nan
             self.regionsTotal = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
             self.regionsDiff = np.zeros((len(self.polys), self.lat.size, self.lon.size)) * np.nan
-            for i in range(len(self.polys)):
+            regions = xr.DataArray(regions, dims=('regions','lat','lon'), coords={'regions':range(numRegions),'lat':self.kdeGridY[:,0],'lon':self.kdeGridX[0,:]})
+            regionsMasked = np.ones_like(regions)
+            for i in range(numRegions):
                 self.regionsDaily[i,:,:,:] = daily.salem.roi(geometry=self.polys[i])
                 self.regionsTotal[i,:,:] = total.salem.roi(geometry=self.polys[i])
                 self.regionsDiff[i,:,:] = diff.salem.roi(geometry=self.polys[i])
+                regionsMasked[i,:,:] = regions[i,:,:].salem.roi(geometry=self.polys[i])
 
             #calc the cosine of the latitudes for the weights and average across the lons
             weights = np.cos(np.radians(self.lat))
@@ -672,9 +690,12 @@ class DateTest(object):
             self.regionsDaily = self.regionsDaily.reshape(p,t*y*x)
             p,y,x = self.regionsTotal.shape
             self.regionsTotal = self.regionsTotal.reshape(p,y*x)
-
             self.regionsDiff = self.regionsDiff.reshape(p,y*x)
 
+            #find number of points inside each region
+            self.numPoints = np.zeros((numRegions))*np.nan
+            for i in range(numRegions):
+                self.numPoints[i] = np.where(~np.isnan(regionsMasked[i,:,:]))[0].size
             """
             ax = plt.axes(projection=self._targetProj)
             ax.set_extent([232,294,24,50])
