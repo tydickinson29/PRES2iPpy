@@ -1,3 +1,4 @@
+import helpers
 import numpy as np
 from netCDF4 import MFDataset,Dataset,num2date
 import matplotlib.pyplot as plt
@@ -99,18 +100,17 @@ class DateTest(object):
                     '7':['July',31], '8':['August',31], '9':['September',30],
                     '10':['October',31], '11':['November',30], '12':['December',31]}
 
-    def __init__(self,month,day,year,length=14):
-        #init called first
-        #print('init method called')
+    def __init__(self,month,day,year,length=14,dataset='livneh'):
         self.month = month
         self.day = day
         self.year = year
         self.length = length
+        self.dataset = dataset
 
         #FIXME: Down the road, will have 1 netCDF4 file for all 95 percentiles
         #with lengths 14, 30, 60, and 90. Take additional argument in constructor
         #to slice intercept, slope for correct length
-        with Dataset('/share/data1/Students/ty/models/quantReg.95.14.nc','r') as nc:
+        with Dataset('/scratch/tdickinson/%s.quantReg.95.14.nc'%(self.dataset),'r') as nc:
             self.lat = nc.variables['lat'][:]
             self.lon = nc.variables['lon'][:]
             #length = nc.variables['length'][:]
@@ -130,8 +130,8 @@ class DateTest(object):
 
         self.model = self.intercept + self.slope*self.year
 
-        gridLats = np.arange(24, 50.1, 0.1)
-        gridLons = np.arange(232, 294.1, 0.1)
+        gridLats = np.arange(18, 62.1, 0.1)
+        gridLons = np.arange(228, 302.1, 0.1)
         self.kdeGridX, self.kdeGridY = np.meshgrid(gridLons, gridLats)
 
         self.obs = None
@@ -156,8 +156,6 @@ class DateTest(object):
 
     @property
     def month(self):
-        #property called third
-        #print('month property method called')
         """Get or set the current month. Setting the month to a new value will
         set the ``DATE_BEGIN`` and ``DATE_END`` properties automatically.
         """
@@ -165,8 +163,6 @@ class DateTest(object):
 
     @month.setter
     def month(self,val):
-        #setter called second; if attribute updated after initialization, only setter method called
-        #print('month setter method called')
         if str(val) not in self._daysInMonth.keys():
             raise ValueError('%s is not a valid month.'%val)
         else:
@@ -218,6 +214,20 @@ class DateTest(object):
             self.__length = val
 
     @property
+    def dataset(self):
+        """Get or set the dataset to use.
+        """
+        return self.__dataset
+
+    @dataset.setter
+    def dataset(self,val):
+        validDatasets = ['livneh','era5']
+        if val not in validDatasets:
+            raise ValueError('%s is currently not a supported dataset.'%(val))
+        else:
+            self.__dataset = val
+
+    @property
     def DATE_BEGIN(self):
         """Set the beginning date instance attribute. ``DATE_BEGIN`` will be type `datetime <https://docs.python.org/2/library/datetime.html>`_.
         """
@@ -233,17 +243,28 @@ class DateTest(object):
 
     @property
     def datasetBegin(self):
-        if self.DATE_BEGIN.year < 2012:
-            return 'Livneh'
+        if self.dataset == 'era5':
+            return 'ERA5'
         else:
-            return 'PRISM'
+            if self.DATE_BEGIN.year < 2012:
+                return 'Livneh'
+            else:
+                return 'PRISM'
 
     @property
     def datasetEnd(self):
-        if self.DATE_END.year < 2012:
-            return 'Livneh'
+        if self.dataset == 'era5':
+            return 'ERA5'
         else:
-            return 'PRISM'
+            if self.DATE_END.year < 2012:
+                return 'Livneh'
+            else:
+                return 'PRISM'
+
+    @property
+    def isLeapDay(self):
+        if (self.month == 2) and (self.day == 29):
+            raise ValueError('Leap day is currently an unsupported input date.')
 
     """
     def _mask(self, arrToMask):
@@ -254,59 +275,10 @@ class DateTest(object):
         shpSlice = shp.loc[shp['NAME'].isin(['UNITED STATES'])]
         test = arr.salem.roi(shape=shpSlice)
         test = test.values
-        return tmp
+        return test
     """
 
-    def _interp(self, datain, xin, yin, xout, yout):
-          # compute grid coordinates of output grid.
-          delx = xin[1:]-xin[0:-1]
-          dely = yin[1:]-yin[0:-1]
-          if max(delx)-min(delx) < 1.e-4 and max(dely)-min(dely) < 1.e-4:
-              # regular input grid.
-              xcoords = (len(xin)-1)*(xout-xin[0])/(xin[-1]-xin[0])
-              ycoords = (len(yin)-1)*(yout-yin[0])/(yin[-1]-yin[0])
-          else:
-              # irregular (but still rectilinear) input grid.
-              xoutflat = xout.flatten(); youtflat = yout.flatten()
-              ix = (np.searchsorted(xin,xoutflat)-1).tolist()
-              iy = (np.searchsorted(yin,youtflat)-1).tolist()
-              xoutflat = xoutflat.tolist(); xin = xin.tolist()
-              youtflat = youtflat.tolist(); yin = yin.tolist()
-              xcoords = []; ycoords = []
-              for n,i in enumerate(ix):
-                  if i < 0:
-                      xcoords.append(-1) # outside of range on xin (lower end)
-                  elif i >= len(xin)-1:
-                      xcoords.append(len(xin)) # outside range on upper end.
-                  else:
-                      xcoords.append(float(i)+(xoutflat[n]-xin[i])/(xin[i+1]-xin[i]))
-              for m,j in enumerate(iy):
-                  if j < 0:
-                      ycoords.append(-1) # outside of range of yin (on lower end)
-                  elif j >= len(yin)-1:
-                      ycoords.append(len(yin)) # outside range on upper end
-                  else:
-                      ycoords.append(float(j)+(youtflat[m]-yin[j])/(yin[j+1]-yin[j]))
-              xcoords = np.reshape(xcoords,xout.shape)
-              ycoords = np.reshape(ycoords,yout.shape)
-
-          xcoords = np.clip(xcoords,0,len(xin)-1)
-          ycoords = np.clip(ycoords,0,len(yin)-1)
-          xi = xcoords.astype(np.int32)
-          yi = ycoords.astype(np.int32)
-          xip1 = xi+1
-          yip1 = yi+1
-          xip1 = np.clip(xip1,0,len(xin)-1)
-          yip1 = np.clip(yip1,0,len(yin)-1)
-          delx = xcoords-xi.astype(np.float32)
-          dely = ycoords-yi.astype(np.float32)
-          dataout = (1.-delx)*(1.-dely)*datain[yi,xi] + \
-                    delx*dely*datain[yip1,xip1] + \
-                    (1.-delx)*dely*datain[yip1,xi] + \
-                    delx*(1.-dely)*datain[yi,xip1]
-          return dataout
-
-    def interp(self, data, split=False, firstPiece=None):
+    def prepInterp(self, data, split=False, firstPiece=None):
         """Interpolate PRISM grid to Livneh grid in order to correctly compare to extreme thresholds.
 
         Parameters
@@ -319,11 +291,11 @@ class DateTest(object):
             Ignore if split is False. If split is True, an array should be given holding Livneh data.
         """
 
-        with Dataset('/share/data1/reanalyses/PRISM/daily/prec.2018.nc','r') as nc:
+        with Dataset('/scratch/tdickinson/PRISM/prec.2018.nc','r') as nc:
             latPRISM = nc.variables['lat'][:]
             lonPRISM = nc.variables['lon'][:]
 
-        with Dataset('/share/data1/reanalyses/Livneh/prec.1915.nc', 'r') as nc:
+        with Dataset('/scratch/tdickinson/Livneh/prec.1915.nc', 'r') as nc:
             latLivneh = nc.variables['lat'][:]
             lonLivneh = nc.variables['lon'][:] - 360.
 
@@ -337,7 +309,7 @@ class DateTest(object):
         #interpolate PRISM obs to Livneh grid each day at a time
         tmp = np.zeros((data.shape[0],lonMesh.shape[0],lonMesh.shape[1]))
         for i in range(tmp.shape[0]):
-            tmp[i,:,:] = self._interp(datain=data[i,:,:], xin=lonPRISM, yin=latPRISM[::-1],
+            tmp[i,:,:] = helpers.interp(datain=data[i,:,:], xin=lonPRISM, yin=latPRISM[::-1],
                             xout=lonMesh, yout=latMesh)
         if split:
             self.obs = np.concatenate((firstPiece[:,self._iY,:][:,:,self._iX], tmp), axis=0)
@@ -357,14 +329,26 @@ class DateTest(object):
         threshold.
         """
         split = False
-        if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
-            beginPath = endPath = '/share/data1/reanalyses/Livneh/prec.'
-        elif (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'PRISM'):
-            beginPath = endPath = '/share/data1/reanalyses/PRISM/daily/prec.'
+        tag = 'prec'
+        if self.dataset == 'era5':
+            beginPath = endPath = '/scratch/tdickinson/era5/tp_daily_'
+            tag = 'tp'
+            latBounds = [20,60]
+            lonBounds = [230,300]
+            with Dataset('%s1979.nc'%(beginPath),'r') as nc:
+                lats = nc.variables['latitude'][:]
+                self._iLat = np.where((lats >= latBounds[0]) & (lats <= latBounds[1]))[0]
+                lons = nc.variables['longitude'][:]
+                self._iLon = np.where((lons >= lonBounds[0]) & (lons <= lonBounds[1]))[0]
         else:
-            beginPath = '/share/data1/reanalyses/Livneh/prec.'
-            endPath = '/share/data1/reanalyses/PRISM/daily/prec.'
-            split = True
+            if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
+                beginPath = endPath = '/scratch/tdickinson/Livneh/prec.'
+            elif (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'PRISM'):
+                beginPath = endPath = '/scratch/tdickinson/PRISM/prec.'
+            else:
+                beginPath = '/scratch/tdickinson/Livneh/prec.'
+                endPath = '/scratch/tdickinson/PRISM/prec.'
+                split = True
 
         if self.DATE_BEGIN.year == self.DATE_END.year:
             with Dataset(beginPath+'%d.nc'%(self.year),'r') as nc:
@@ -381,13 +365,16 @@ class DateTest(object):
                 else:
                     self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
 
-                self.obs = nc.variables['prec'][self._locs,:,:]
-                self.units = nc.variables['prec'].units
+                if self.dataset == 'era5':
+                    self.obs = nc.variables[tag][self._locs,self._iLat,self._iLon]
+                else:
+                    self.obs = nc.variables[tag][self._locs,:,:]
+                self.units = nc.variables[tag].units
 
             self.obs = self.obs.filled(np.nan)
             self._time = time[self._locs]
             if self.datasetBegin == 'PRISM':
-                self.interp(data=self.obs[:,::-1,:])
+                self.prepInterp(data=self.obs[:,::-1,:])
 
         else:
             #here, the window goes into the following year so we must load two files
@@ -400,9 +387,12 @@ class DateTest(object):
                 day = np.array([d.day for d in time1])
 
                 time1Locs = np.where(((month>=self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month<=12)&(day<=31)))[0]
-                time1Obs = nc.variables['prec'][time1Locs,:,:]
+                if self.dataset == 'era5':
+                    time1Obs = nc.variables[tag][time1Locs,self._iLat,self._iLon]
+                else:
+                    time1Obs = nc.variables[tag][time1Locs,:,:]
                 time1Obs = time1Obs.filled(np.nan)
-                self.units = nc.variables['prec'].units
+                self.units = nc.variables[tag].units
 
             with Dataset(endPath+'%d.nc'%(self.DATE_END.year), 'r') as nc:
                 time = nc.variables['time'][:]
@@ -413,19 +403,26 @@ class DateTest(object):
                 day = np.array([d.day for d in time2])
 
                 time2Locs = np.where(((month>=1)&(day>=1)) & ((month<=self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-                time2Obs = nc.variables['prec'][time2Locs,:,:]
+                if self.dataset == 'era5':
+                    time2Obs = nc.variables[tag][time2Locs,self._iLat,self._iLon]
+                else:
+                    time2Obs = nc.variables[tag][time2Locs,:,:]
                 time2Obs = time2Obs.filled(np.nan)
 
-            if (not split) and (self.datasetEnd == 'Livneh'):
+            if ((not split) and (self.datasetEnd == 'Livneh')) or (self.dataset == 'era5'):
                 self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
             elif (not split) and (self.datasetBegin == 'PRISM'):
                 self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
-                self.interp(data=self.obs[:,::-1,:])
+                self.prepInterp(data=self.obs[:,::-1,:])
             else:
-                self.interp(data=time2Obs[:,::-1,:], split=True, firstPiece=time1Obs)
+                self.prepInterp(data=time2Obs[:,::-1,:], split=True, firstPiece=time1Obs)
 
+            self._locs = np.concatenate((time1Locs,time2Locs), axis=None)
             self._time = np.concatenate((time1[time1Locs],time2[time2Locs]), axis=None)
 
+        if self.units == 'm':
+            self.obs *= 1000
+            self.units = 'mm'
         self.total = np.sum(self.obs,axis=0)
         #if self.datasetEnd == 'Livneh':
             #self.model = self._mask(self.model)
@@ -441,27 +438,41 @@ class DateTest(object):
         if self.diff is None:
             self.getObs()
 
-        with Dataset('/share/data1/Students/ty/models/means.14.nc','r') as nc:
+        if self.dataset == 'era5':
+            path = '/scratch/tdickinson/era5/tp_daily_ltm.nc'
+        else:
+            path = ''
+
+        with Dataset(path,'r') as nc:
+            """
             time = nc.variables['time'][:]
             timeUnits = nc.variables['time'].units
             timeCalendar = nc.variables['time'].calendar
             time = num2date(time,timeUnits,timeCalendar)
             months = np.array([d.month for d in time])
             days = np.array([d.day for d in time])
-            itime = np.where((months==self.month) & (days==self.day))[0]
-            self.means = nc.variables['mean'][itime,:,:].squeeze()
-
-        if self.datasetEnd == 'PRISM':
-            #adjust slightly for interpolated obs
-            self.means = self.means[self._iY,:][:,self._iX]
+            if self.DATE_BEGIN.month == self.DATE_END.month:
+                iloc = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) & ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
+            else:
+                iloc = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) | ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
+            leapDay = np.where((months==2) & (days==29))[0][0]
+            idx = np.where(iloc == leapDay)[0]
+            if idx.size != 0:
+                iloc = np.delete(iloc,idx)
+            """
+            if self.dataset == 'era5':
+                self.means = nc.variables['tp'][self._locs,self._iLat,self._iLon] * 1000
+            else:
+                self.means = nc.variables['prec'][self._locs,:,:]
 
         t,y,x = self.obs.shape
         tmpObs = self.obs.reshape(t,y*x)
-        tmpMeans = self.means.reshape(y*x)
+        tmpMeans = self.means.reshape(t,y*x)
         nonNaN = np.where(~np.isnan(tmpObs[0,:]))[0]
         self.duration = np.zeros(y*x)*np.nan
         for i in nonNaN:
-            self.duration[i] = np.where(tmpObs[:,i] >= tmpMeans[i])[0].size
+            diff = tmpObs[:,i] - tmpMeans[:,i]
+            self.duration[i] = len(np.where(diff > 0)[0])
         self.duration = self.duration.reshape(y,x)
         return
 
@@ -476,7 +487,7 @@ class DateTest(object):
         if self.duration is None:
             self.checkDuration()
 
-        self.extreme = (self.diff >= 0) & (self.duration >= 7)
+        self.extreme = (self.diff >= 0) & (self.duration >= (self.length / 2.))
         return
 
     def kde(self, weighted=False, **kwargs):
@@ -582,7 +593,7 @@ class DateTest(object):
         self._targetProj = ccrs.AlbersEqualArea(central_latitude=35, central_longitude=250)
 
         ax = plt.axes(projection=self._targetProj)
-        ax.set_extent([232,294,24,50])
+        ax.set_extent([228,302,18,62])
         self._im = plt.contour(self.kdeGridX, self.kdeGridY, self.density, levels=levels,
                             transform=self._origProj)
 
@@ -656,12 +667,16 @@ class DateTest(object):
 
             #first, make xarrays for daily and 14-day precipitation
             #add 360 since cartopy returns vertices in [0,360] and lons are all negative
-            daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':self.lon+360.})
-            total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
+            if self.dataset == 'livneh':
+                lons = self.lon + 360.
+            elif self.dataset == 'era5':
+                lons = self.lon
+            daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':lons})
+            total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':lons})
 
             #define array where only points flagged as extreme are unmasked
             extremeDiffs = np.ma.masked_array(self.diff, ~self.extreme)
-            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':self.lon+360.})
+            diff = xr.DataArray(extremeDiffs, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':lons})
 
             #get array of ones with shape of kde grid and repeat numRegions times
             regions = np.ones_like(self.kdeGridX)
