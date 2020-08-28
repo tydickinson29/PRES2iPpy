@@ -164,9 +164,10 @@ def plotExtremePoints(obj):
     m.drawcoastlines()
     m.drawcountries()
     m.drawstates()
-    im = m.contourf(x, y, obj.extreme, latlon=True, levels=[0,0.5,1], colors=['white','green'])
-    plt.title('%d/%d - %d/%d Extreme Points'
-        %(obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_END.month,obj.DATE_END.day))
+    cmap = colors.ListedColormap(['white','green'])
+    im = m.pcolormesh(x, y, obj.extreme, cmap=cmap, latlon=True)
+    plt.title('%s %d/%d - %d/%d Extreme Points'
+        %(obj.datasetBegin,obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_END.month,obj.DATE_END.day))
     plt.tight_layout()
     plt.show(block=False)
     return
@@ -190,6 +191,36 @@ def area(im):
     print(areasDict)
     return
 """
+
+def plotKDEDensity(obj, **kwargs):
+    """Plot the kernel density estimation normalized density.
+
+    Parameters
+    ----------
+    obj : object
+        :class:`rainpy` object for the desired 14-day period.
+    """
+
+    kwargs.setdefault('levels', np.arange(0,1.1,0.1))
+    kwargs.setdefault('cmap', 'Reds')
+
+    fig = plt.figure(figsize=(8,6))
+    m = Basemap(projection='aea',resolution='l',
+        llcrnrlat=22.5,llcrnrlon=-120.,urcrnrlat=49.,urcrnrlon=-64,
+        lat_1=29.5, lat_2=45.5, lat_0=37.5, lon_0=-96.)
+    m.drawcoastlines()
+    m.drawcountries()
+    m.drawstates()
+    ticks =
+    im = m.contourf(obj.kdeGridX, obj.kdeGridY, obj.density, latlon=True, **kwargs)
+    cbar = m.colorbar(im,'bottom')
+    cbar.set_label('Normalized Density')
+    plt.title('%s %d/%d - %d/%d KDE with %s Kernel and %s Bandwidth'
+        %(obj.datasetBegin,obj.DATE_BEGIN.month,obj.DATE_BEGIN.day,obj.DATE_END.month,obj.DATE_END.day,obj.KDE.kernel.capitalize(), obj.KDE.bandwidth))
+    plt.tight_layout()
+    plt.show(block=False)
+    return
+
 def makePlot(obj, filled=True, cmapRain='greg', save=False, **kwargs):
     """Make 3- or 4-panel plot based on instance attributes.
 
