@@ -221,7 +221,7 @@ class DateTest(object):
 
     @dataset.setter
     def dataset(self,val):
-        validDatasets = ['livneh','era5']
+        validDatasets = ['livneh','era5','era5_1','era5_2','era5_3']
         if val not in validDatasets:
             raise ValueError('%s is currently not a supported dataset.'%(val))
         else:
@@ -245,6 +245,12 @@ class DateTest(object):
     def datasetBegin(self):
         if self.dataset == 'era5':
             return 'ERA5'
+        elif self.dataset == 'era5_1':
+            return 'ERA5_1x1'
+        elif self.dataset == 'era5_2':
+            return 'ERA5_2x2'
+        elif self.dataset == 'era5_3':
+            return 'ERA5_3x3'
         else:
             if self.DATE_BEGIN.year < 2012:
                 return 'Livneh'
@@ -255,6 +261,12 @@ class DateTest(object):
     def datasetEnd(self):
         if self.dataset == 'era5':
             return 'ERA5'
+        elif self.dataset == 'era5_1':
+            return 'ERA5_1x1'
+        elif self.dataset == 'era5_2':
+            return 'ERA5_2x2'
+        elif self.dataset == 'era5_3':
+            return 'ERA5_3x3'
         else:
             if self.DATE_END.year < 2012:
                 return 'Livneh'
@@ -265,6 +277,19 @@ class DateTest(object):
     def isLeapDay(self):
         if (self.month == 2) and (self.day == 29):
             raise ValueError('Leap day is currently an unsupported input date.')
+
+    @property
+    def _eraResolution(self):
+        if self.dataset == 'era5':
+            return 'native'
+        elif self.dataset == 'era5_1':
+            return '1x1'
+        elif self.dataset == 'era5_2':
+            return '2x2'
+        elif self.dataset == 'era5_3':
+            return '3x3'
+        else:
+            return None
 
     """
     def _mask(self, arrToMask):
@@ -330,15 +355,22 @@ class DateTest(object):
         """
         split = False
         tag = 'prec'
-        if self.dataset == 'era5':
-            beginPath = endPath = '/scratch/tdickinson/era5/tp_daily_'
+        if 'era5' in self.dataset:
+            if self.dataset == 'era5':
+                beginPath = endPath = '/scratch/tdickinson/era5/native/tp_daily_'
+                tagLat = 'latitude'
+                tagLon = 'longitude'
+            else:
+                beginPath = endPath = '/scratch/tdickinson/era5/%s/tp_%s_daily_'%(self._eraResolution,self._eraResolution)
+                tagLat = 'lat'
+                tagLon = 'lon'
             tag = 'tp'
             latBounds = [20,60]
             lonBounds = [230,300]
             with Dataset('%s1979.nc'%(beginPath),'r') as nc:
-                lats = nc.variables['latitude'][:]
+                lats = nc.variables[tagLat][:]
                 self._iLat = np.where((lats >= latBounds[0]) & (lats <= latBounds[1]))[0]
-                lons = nc.variables['longitude'][:]
+                lons = nc.variables[tagLon][:]
                 self._iLon = np.where((lons >= lonBounds[0]) & (lons <= lonBounds[1]))[0]
         else:
             if (self.datasetBegin == self.datasetEnd) and (self.datasetBegin == 'Livneh'):
@@ -365,7 +397,7 @@ class DateTest(object):
                 else:
                     self._locs = np.where(((month==self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) | ((month==self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
 
-                if self.dataset == 'era5':
+                if 'era5' in self.dataset:
                     self.obs = nc.variables[tag][self._locs,self._iLat,self._iLon]
                 else:
                     self.obs = nc.variables[tag][self._locs,:,:]
@@ -387,7 +419,7 @@ class DateTest(object):
                 day = np.array([d.day for d in time1])
 
                 time1Locs = np.where(((month>=self.DATE_BEGIN.month)&(day>=self.DATE_BEGIN.day)) & ((month<=12)&(day<=31)))[0]
-                if self.dataset == 'era5':
+                if 'era5' in self.dataset:
                     time1Obs = nc.variables[tag][time1Locs,self._iLat,self._iLon]
                 else:
                     time1Obs = nc.variables[tag][time1Locs,:,:]
@@ -403,13 +435,13 @@ class DateTest(object):
                 day = np.array([d.day for d in time2])
 
                 time2Locs = np.where(((month>=1)&(day>=1)) & ((month<=self.DATE_END.month)&(day<=self.DATE_END.day)))[0]
-                if self.dataset == 'era5':
+                if 'era5' in self.dataset:
                     time2Obs = nc.variables[tag][time2Locs,self._iLat,self._iLon]
                 else:
                     time2Obs = nc.variables[tag][time2Locs,:,:]
                 time2Obs = time2Obs.filled(np.nan)
 
-            if ((not split) and (self.datasetEnd == 'Livneh')) or (self.dataset == 'era5'):
+            if ((not split) and (self.datasetEnd == 'Livneh')) or ('era5' in self.dataset):
                 self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
             elif (not split) and (self.datasetBegin == 'PRISM'):
                 self.obs = np.concatenate((time1Obs, time2Obs), axis=0)
@@ -423,7 +455,7 @@ class DateTest(object):
         if self.units == 'm':
             self.obs *= 1000
             self.units = 'mm'
-        self.total = np.sum(self.obs,axis=0)
+        self.total = np.nansum(self.obs,axis=0)
         #if self.datasetEnd == 'Livneh':
             #self.model = self._mask(self.model)
             #self.total = self._mask(self.total)
@@ -439,41 +471,21 @@ class DateTest(object):
             self.getObs()
 
         if self.dataset == 'era5':
-            path = '/scratch/tdickinson/era5/tp_daily_ltm.nc'
+            path = '/scratch/tdickinson/era5/native/tp_daily_ltm.nc'
+        elif self.dataset == 'livneh':
+            path = '/scratch/tdickinson/Livneh/prec.ltm.nc'
         else:
-            path = ''
+            path = '/scratch/tdickinson/era5/%s/tp_%s_daily_ltm.nc'%(self._eraResolution,self._eraResolution)
 
         with Dataset(path,'r') as nc:
-            """
-            time = nc.variables['time'][:]
-            timeUnits = nc.variables['time'].units
-            timeCalendar = nc.variables['time'].calendar
-            time = num2date(time,timeUnits,timeCalendar)
-            months = np.array([d.month for d in time])
-            days = np.array([d.day for d in time])
-            if self.DATE_BEGIN.month == self.DATE_END.month:
-                iloc = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) & ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
-            else:
-                iloc = np.where(((months==self.DATE_BEGIN.month)&(days>=self.DATE_BEGIN.day)) | ((months==self.DATE_END.month)&(days<=self.DATE_END.day)))[0]
-            leapDay = np.where((months==2) & (days==29))[0][0]
-            idx = np.where(iloc == leapDay)[0]
-            if idx.size != 0:
-                iloc = np.delete(iloc,idx)
-            """
-            if self.dataset == 'era5':
+            if 'era5' in self.dataset:
                 self.means = nc.variables['tp'][self._locs,self._iLat,self._iLon] * 1000
             else:
                 self.means = nc.variables['prec'][self._locs,:,:]
 
-        t,y,x = self.obs.shape
-        tmpObs = self.obs.reshape(t,y*x)
-        tmpMeans = self.means.reshape(t,y*x)
-        nonNaN = np.where(~np.isnan(tmpObs[0,:]))[0]
-        self.duration = np.zeros(y*x)*np.nan
-        for i in nonNaN:
-            diff = tmpObs[:,i] - tmpMeans[:,i]
-            self.duration[i] = len(np.where(diff > 0)[0])
-        self.duration = self.duration.reshape(y,x)
+        tmp = np.array([self.obs >= self.means]).squeeze()
+        tmp = np.ma.masked_array(tmp, self.means.mask)
+        self.duration = tmp.sum(axis=0).astype(float).filled(np.nan)
         return
 
     def getExtremePoints(self):
@@ -669,7 +681,7 @@ class DateTest(object):
             #add 360 since cartopy returns vertices in [0,360] and lons are all negative
             if self.dataset == 'livneh':
                 lons = self.lon + 360.
-            elif self.dataset == 'era5':
+            elif 'era5' in self.dataset:
                 lons = self.lon
             daily = xr.DataArray(self.obs, dims=('time', 'lat', 'lon'), coords={'time':self._time, 'lat':self.lat, 'lon':lons})
             total = xr.DataArray(self.total, dims=('lat', 'lon'), coords={'lat':self.lat, 'lon':lons})
