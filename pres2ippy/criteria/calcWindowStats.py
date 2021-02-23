@@ -83,7 +83,7 @@ def loadWindowPrecip(begin, length, mode):
     return allData
 
 
-begin = datetime.datetime(month=11, day=30, year=1915)
+begin = datetime.datetime(month=1, day=1, year=1915)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--length", type=int, help="number of days in window")
@@ -96,7 +96,7 @@ modeOptions = ['totals', 'means']
 if mode not in modeOptions:
     raise ValueError(f'{mode} is not a supported mode. Options are {modeOptions}')
 
-for i in range(32):
+for i in range(365):
     date = begin + datetime.timedelta(days=i)
     precip = loadWindowPrecip(begin=date, length=length, mode=mode)
     precip = precip.filled(np.nan)
