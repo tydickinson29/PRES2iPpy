@@ -75,7 +75,7 @@ def reconstruct(P, anbn):
 
     Returns
     -------
-    signal : array, shape (P, s)
+    result : array, shape (P, s)
         Reconstructed time series using the reduced number of Fourier harmonics.
     """
     result = np.zeros((P, anbn.shape[-1]))
@@ -87,6 +87,57 @@ def reconstruct(P, anbn):
         bTerm = b[np.newaxis,:] * np.sin(2*np.pi*n*t/P)[:,np.newaxis]
         result += aTerm + bTerm
     return result
+
+def consecutive(data, stepsize=1):
+    """
+    Helper function for fixNegativeThresholds to group consecutive elements
+    in a NumPy array.
+
+    Parameters
+    ----------
+    data : arr-like
+        NumPy array containing indices with negative percentile thresholds.
+    stepsize : int, default = 1
+        Size between elements to be grouped together. Setting stepsize=1 (default)
+        groups consecutive elements.
+
+    Returns
+    -------
+    Array of arrays where each array contains consecutive elements.
+    """
+    return np.split(data, np.where(np.diff(data) != stepsize)[0]+1)
+
+def fixNegativeThresholds(raw, smoothed):
+    """
+    Function to remove unphysical, negative precipitation thresholds that arise
+    from smoothing via a reduced number of Fourier harmonics. Negative values are
+    replaced with the mean values over the same indices (i.e., time windows) before
+    smoothing occurred.
+
+    Parameters
+    ----------
+    raw : arr-like
+        Raw precipitation thresholds before Fourier smoothing. In other words,
+        the window-by-window percentiles.
+    smoothed : arr-like
+        Precipitation thresholds after Fourier smoothing.
+
+    Returns
+    -------
+    new : numpy.ndarray
+        Copy of smoothed except with negative indices replaced with the mean raw
+        values over the same indices.
+    """
+    new = smoothed.copy()
+    for i in range(new.shape[-1]):
+        negLocs = np.where(smoothed[:,i] <= 0)[0]
+        if all(np.isnan(smoothed[:,i])) or (negLocs.size == 0):
+            continue
+        else:
+            negLocs = consecutive(negLocs)
+            for j in negLocs:
+                new[j,i] = np.mean(raw[j,i])
+    return new
 
 def netCDF4Writer(data, name, length, q, n):
     """
@@ -136,16 +187,14 @@ def netCDF4Writer(data, name, length, q, n):
     time.standard_name = 'time'
     time.calendar = 'standard'
     time.units = 'days since 1915-01-01 00:00:00'
-    time.actual_range = np.arange(data['threshold'].shape[0])
 
     threshold.standard_name = 'threshold'
     threshold.long_name = f'threshold for {length}-day extreme precipitation events (percentile={q})'
     threshold.units = 'mm'
 
-    dataset.description = 'File containing precipitation thresholds for the CONUS for each window of length {length} of the year. Thresholds were calculated using the {q} percentile and smoothed using the first {n} Fourier harmonics. Original data source was daily Livneh data plus interpolated daily PRISM data post 2011. The year attribute in the time object is arbitrary.'
+    dataset.description = f'File containing precipitation thresholds for the CONUS for each window of length {length} of the year. Thresholds were calculated using the {q} percentile and smoothed using the first {n} Fourier harmonics. Original data source was daily Livneh data plus interpolated daily PRISM data post 2011. The year attribute in the time object is arbitrary.'
     today = datetime.datetime.today()
     dataset.history = 'Created %d/%d/%d'%(today.month, today.day, today.year)
-    dataset.source = 'Ty A. Dickinson'
 
     #store data in the variables created earlier
     lat[:] = data['lat']
@@ -188,8 +237,9 @@ for i in range(percs.shape[0]):
 
 percs = percs.reshape(365, numLats*numLons)
 coefs = fourierSeries(period=percs, N=numComponents)
-data['threshold'] = reconstruct(P=365, anbn=coefs)
+threshold = reconstruct(P=365, anbn=coefs)
+data['threshold'] = fixNegativeThresholds(raw=percs, smoothed=threshold)
 data['threshold'] = data['threshold'].reshape(365, numLats, numLons)
 
-fileName = f'/home/tdickinson/data/livnehPRISM.thresholds.q{int(percentile)}.n{length}.nc'
+fileName = f'/scratch/tdickinson/files/livnehPRISM.thresholds.q{int(percentile)}.n{length}.nc'
 netCDF4Writer(data=data, name=fileName, length=length, q=percentile, n=numComponents)
