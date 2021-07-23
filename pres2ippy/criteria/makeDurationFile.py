@@ -1,3 +1,17 @@
+#################################################################################
+#Script to load .npy files saved from calcWindowStats.py and save in a netCDF4
+#file. Uses the `length` argument to load the appropriate data and for use in the
+#netCDF4 metadata,
+
+#Arguments
+#---------
+#length : int
+#    Total number of days in the window.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 import numpy as np
 from netCDF4 import Dataset, date2num
 import datetime

@@ -1,3 +1,20 @@
+#################################################################################
+#Script to save individual .npy files for windows beginning on each calendar day.
+#The .npy file contains either precipitation sums or means, based on the `mode`
+#argument, for each grid point in the domain.
+
+#Arguments
+#---------
+#length : int
+#    Total number of days in the window.
+#mode : str {'totals', 'means'}
+#   'totals' : `length`-day sums for each year, gives dimensionality (time, lat, lon).
+#   'means' : mean of all days in the window is calculated; dimensionality (lat, lon).
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 import numpy as np
 from netCDF4 import MFDataset, num2date
 import datetime
@@ -8,6 +25,7 @@ import argparse
 
 def _getFiles(source):
     options = ['PRISM','Livneh']
+    #get file paths and remove any long-term mean files in the directory
     files = glob.glob(f'/scratch/tdickinson/{source}/*.nc')
     files = [i for i in files if 'ltm' not in i]
     files.sort()

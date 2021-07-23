@@ -1,3 +1,23 @@
+#################################################################################
+#Script to calculate an input percentile for precipitation totals as a function of
+#space, smooth window-to-window variability in percentile threshold via Fourier
+#harmonics, and saves the result in netCDF4 format. Loads .npy files saved from
+#calcWindowStats.py
+
+#Arguments
+#---------
+#length : int
+#    Total number of days in the window.
+#percentile : int or float
+#    Percentile to calculate.
+#components : int
+#   Number of Fourier harmonics to use in the smoothing. components=3 will use
+#   wavenumbers 0, 1, 2, and 3 to smooth the raw signal.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 import numpy as np
 from netCDF4 import Dataset, date2num
 import datetime
