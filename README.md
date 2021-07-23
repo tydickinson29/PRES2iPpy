@@ -5,19 +5,3 @@ This repository is to document the code used for analysis by Ty A. Dickinson as 
 ## What is PRES2iP?
 
 PRES2iP stands for Prediction of Rainfall Extremes at Subseasonal to Seasonal Periods. The PRES2iP team consists of undergraduates, graduates, and faculty at the University of Oklahoma as well as scientists at the National Severe Storms Laboratory, National Center for Atmospheric Research, the Cooperative Institute of Mesoscale Meteorological Studies, and the OU South Central Climate Adaptation Science Center. The work is supported by the National Science Foundation under Grant No. ICER-1663840. Check out the team's website [here](http://pres2ip.com) or on Twitter @pres2ip. 
-
-## Versions of Packages Used
-- `basemap` = 1.2.0
-- `cartopy` = 0.17.0
-- `geopandas` = 0.5.1
-- `netcdf4` = 1.4.2
-- `numpy` = 1.16.4
-- `matplotlib` = 2.2.3
-- `mpi4py` = 3.0.1
-- `mpi` = 1.0
-- `mpich` = 3.2.1
-- `salem` = 0.2.4
-- `scikit-learn` = 0.20.3
-- `shapely` = 1.6.4
-- `statsmodels` = 0.10.0
-- `xarray` = 0.12.3
