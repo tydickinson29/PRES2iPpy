@@ -47,17 +47,14 @@ def netCDF4Writer(data, name, length):
     time.standard_name = 'time'
     time.calendar = 'standard'
     time.units = 'days since 1915-01-01 00:00:00'
-    tmp = np.arange(data['duration'].shape[0])
-    time.actual_range = np.array([tmp.min(), tmp.max()])
 
     duration.standard_name = 'duration'
     duration.long_name = f'duration threshold for {length}-day extreme precipitation events'
     duration.units = 'mm'
 
-    dataset.description = 'File containing daily precipitation thresholds for the duration criteria across the CONUS for each window of length {length} of the year. Thresholds were calculated using the mean daily precipitation for all days in the window. Original data source was daily Livneh data plus interpolated daily PRISM data post 2011. The year attribute in the time object is arbitrary.'
+    dataset.description = f'File containing daily precipitation thresholds for the duration criteria across the CONUS for each window of length {length} of the year. Thresholds were calculated using the mean daily precipitation for all days in the window. Original data source was daily Livneh data plus interpolated daily PRISM data post 2011. The year attribute in the time object is arbitrary.'
     today = datetime.datetime.today()
     dataset.history = 'Created %d/%d/%d'%(today.month, today.day, today.year)
-    dataset.source = 'Ty A. Dickinson'
 
     #store data in the variables created earlier
     lat[:] = data['lat']
