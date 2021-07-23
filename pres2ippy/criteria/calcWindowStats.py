@@ -19,6 +19,9 @@ def _loadData(begin, length, source):
     firstYr = int(files[0].split('.')[-2])
     lastYr = int(files[-1].split('.')[-2])
 
+    if source == 'PRISM':
+        lastYr -= 1
+
     nc = MFDataset(files, 'r')
     lat = nc.variables['lat'][:]
     lon = nc.variables['lon'][:]
@@ -58,12 +61,16 @@ def _loadData(begin, length, source):
 def loadWindowPrecip(begin, length, mode):
     livnehLat, livnehLon, livnehData = _loadData(begin=begin, length=length, source='Livneh')
     prismLat, prismLon, prismData = _loadData(begin=begin, length=length, source='PRISM')
+    #reduce from 64 bits to 32 bits for memory
+    livnehData = livnehData.astype(np.float32)
+    prismData = prismData.astype(np.float32)
 
     #bilinearly interpolate PRISM data to Livneh dataset grid
     gridIn = {'lat':prismLat, 'lon':prismLon+360}
     gridOut = {'lat':livnehLat, 'lon':livnehLon}
     regridder = xe.Regridder(gridIn, gridOut, method='bilinear', reuse_weights=True)
     prismRegrid = regridder(prismData)
+    prismRegrid = prismRegrid.astype(np.float32)
     #create mask based on pre-existing NaN and where Livneh data extends further north
     mask = np.isnan(prismRegrid[0]) | (livnehLat > prismLat.max())[:,None]
     prismRegrid = np.ma.array(prismRegrid, mask=np.tile(mask, (prismRegrid.shape[0],1,1)))
@@ -83,7 +90,7 @@ def loadWindowPrecip(begin, length, mode):
     return allData
 
 
-begin = datetime.datetime(month=11, day=30, year=1915)
+begin = datetime.datetime(month=1, day=1, year=1915)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--length", type=int, help="number of days in window")
@@ -96,8 +103,9 @@ modeOptions = ['totals', 'means']
 if mode not in modeOptions:
     raise ValueError(f'{mode} is not a supported mode. Options are {modeOptions}')
 
-for i in range(32):
+for i in range(365):
     date = begin + datetime.timedelta(days=i)
     precip = loadWindowPrecip(begin=date, length=length, mode=mode)
     precip = precip.filled(np.nan)
     np.save(f'/scratch/tdickinson/Livneh/windows/{length}/{mode}/precip.{str(date.month).zfill(2)}{str(date.day).zfill(2)}.npy', precip)
+    del precip
