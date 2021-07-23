@@ -11,4 +11,4 @@ buildAreaDistribution.py --> Builds on buildKDEDistribution.py by using the cont
 
 generateDatabase.py --> Combines utilization of both KDE density contour and area threshold to build the database. Any polygon with an area > the threshold determined by the previous step is saved, along with various information such as area-averaged precipitation, total over extreme, and geospatial information. After all dates are tested, the info is put into a Pandas DataFrame and saved in .csv format.
 
-postprocess.py --> Postprocessing algorithm for the database. Groups polygons into similar groups if they have overlapping windows and spatial correlations of >= 0.5. See Dickinson et al. (2021) for more details. Saves the final database in both .csv and .shp formats.
+postprocess.py --> Postprocessing algorithm for the database. Groups polygons into similar groups if they have overlapping windows and spatial correlations of >= 0.5. See <a href='https://doi.org/10.1175/JCLI-D-20-0580.1'>Dickinson et al. (2021)</a> for more details. Saves the final database in both .csv and .shp formats.
