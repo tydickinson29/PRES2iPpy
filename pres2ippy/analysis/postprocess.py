@@ -1,3 +1,13 @@
+#################################################################################
+#Postprocessing algorithm for the database. Groups polygons into similar groups
+#if they have overlapping windows and spatial correlations of >= 0.5. See
+#Dickinson et al. (2021) for more details. Saves the final database in both .csv
+#and .shp formats, providing the environment has the geopandas library.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 import numpy as np
 import salem
 import xarray as xr
@@ -5,8 +15,6 @@ import pandas as pd
 import shapely.wkt
 from scipy import stats
 import glob
-#import geopandas
-#import pyproj
 
 def groupEvents(arr, thresh):
     coefs = np.zeros((arr.shape[0]))

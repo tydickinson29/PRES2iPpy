@@ -1,3 +1,15 @@
+#################################################################################
+#The main file used in building the database. The program contains a class, DateTest,
+#which is constructed by inputting a start month, day, and year, as well as window
+#length, percentile, and dataset. Methods for the class include loading the appropriate
+#data, regridding if needed, getting extreme grid points using our two criteria,
+#performing kernel density estimation, and making arrays with grid points outside
+#an extreme polygon being masked.
+
+#Author : Ty A. Dickinson
+#Last Updated : March 2021
+#################################################################################
+
 import numpy as np
 from netCDF4 import MFDataset,Dataset,num2date
 import xesmf as xe

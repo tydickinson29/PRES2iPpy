@@ -1,3 +1,23 @@
+#################################################################################
+#Uses rainpy.py to build a distribution of KDE densities for all length-day windows
+#for an input month across all years in dataset period of record. Saves distribution
+#as one .npy file. MPI is implemented so the script can be run in parallel. We use
+#the 12 files (one for each month) to build the entire KDE distribution to find the
+#99th percentile to use as the bounding contour for extreme polygons.
+
+#Arguments
+#---------
+#month : str
+#   3 letter abbreviation for month to analyze.
+#length : int
+#   Total number of days in the window.
+#dataset : str
+#   Dataset to use for analysis.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 from mpi4py import MPI
 import rainpy as rp
 import numpy as np
@@ -20,7 +40,7 @@ def main():
     if MONTH is None:
         raise ValueError('Month not input.')
     elif MONTH.lower() not in validMonths:
-        raise ValueError(f'Invalid month input. Valid inputs are {validMonths}.')
+        raise ValueError(f'Invalid month input. Valid inputs are {validMonths}')
 
     if DATASET is None:
         raise ValueError('Dataset not input.')
@@ -41,8 +61,8 @@ def main():
     if rank == 0:
         if DATASET == 'livneh':
             years = np.arange(1915,2019,1)
-        elif 'era5' in DATASET:
-            years = np.arange(1979,2019,1)
+        else:
+            pass
         years = np.array_split(years, size)
 
     years = comm.scatter(years, root=0)
@@ -52,6 +72,7 @@ def main():
     counter = 0
     for yr in years:
         for d in range(1,days+1):
+            #run through the analysis but stop after computing KDE
             date = rp.DateTest(month=usrMonth+1, day=d, year=yr, length=LENGTH, dataset=DATASET)
             date.kde()
             densities[counter,:] = date.density.flatten()

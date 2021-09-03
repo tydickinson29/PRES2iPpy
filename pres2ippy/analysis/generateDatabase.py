@@ -1,3 +1,25 @@
+#################################################################################
+#Combines utilization of both KDE density contour and area threshold to build the
+#database. Any polygon with an area > the threshold determined by the previous step
+#is saved, along with various information such as area-averaged precipitation,
+#total over extreme, and geospatial information. After all dates are tested,
+#the info is put into a Pandas DataFrame and saved in .csv format.
+
+#Arguments
+#---------
+#month : str
+#   3 letter abbreviation for month to analyze.
+#area : int
+#   Minimum area threshold for polygon to be recorded.
+#length : int
+#   Total number of days in the window.
+#dataset : str
+#   Dataset to use for analysis.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 from mpi4py import MPI
 import rainpy as rp
 import pandas as pd

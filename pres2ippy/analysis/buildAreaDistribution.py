@@ -1,3 +1,24 @@
+#################################################################################
+#Builds on buildKDEDistribution.py by using the contour to develop polygons and
+#the area of each polygon is saved. We use the 12 files to find the ~95th percentile
+#to use as the area threshold for the database.
+
+#Arguments
+#---------
+#month : str
+#   3 letter abbreviation for month to analyze.
+#area : int
+#   Minimum area threshold for polygon to be recorded. Defaults to 0 since this
+#   script wants to get ALL areas.
+#length : int
+#   Total number of days in the window.
+#dataset : str
+#   Dataset to use for analysis.
+
+#Author : Ty A. Dickinson
+#Last Updated : June 2021
+#################################################################################
+
 from mpi4py import MPI
 import rainpy as rp
 import numpy as np
@@ -6,7 +27,7 @@ import argparse
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--month", type=str, help="month to analyze")
-    parser.add_argument("-a", "--area", type=int, help="areal threshold")
+    parser.add_argument("-a", "--area", type=int, help="areal threshold", const=0)
     parser.add_argument("-l", "--length", type=int, help="event length")
     parser.add_argument("-d", "--dataset", type=str, help="dataset to use")
     args = parser.parse_args()
@@ -17,29 +38,23 @@ def main():
     DATASET = args.dataset
 
     validMonths = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
-    validDatasets = ['livneh', 'era5', 'era5_1', 'era5_2', 'era5_3']
+    validDatasets = ['livneh']
 
     if MONTH is None:
         raise ValueError('Month not input.')
     elif MONTH.lower() not in validMonths:
-        raise ValueError('Invalid month input. Valid inputs are %s'%(validMonths))
+        raise ValueError(f'Invalid month input. Valid inputs are {validMonths}')
 
     if DATASET is None:
         raise ValueError('Dataset not input.')
     elif DATASET.lower() not in validDatasets:
-        raise ValueError('Invalid dataset input. Valid datasets are %s.'%(validDatasets))
+        raise ValueError(f'Invalid dataset input. Valid datasets are {validDatasets}.')
 
     #results from buildKDEDistribution.py
     if DATASET == 'livneh':
-        DEFAULT_TICK = 0.0865
-    elif DATASET == 'era5':
-        DEFAULT_TICK = 0.1808
-    elif DATASET == 'era5_1':
-        DEFAULT_TICK = 0.1517
-    elif DATASET == 'era5_2':
-        DEFAULT_TICK = 0.2352
+        DEFAULT_TICK = 0.2710
     else:
-        DEFAULT_TICK = 0.2547
+        pass
 
     usrMonth = validMonths.index(MONTH.lower())
 
@@ -55,8 +70,8 @@ def main():
     if rank == 0:
         if DATASET == 'livneh':
             years = np.arange(1915,2019,1)
-        elif 'era5' in DATASET:
-            years = np.arange(1979,2019,1)
+        else:
+            pass
         years = np.array_split(years, size)
 
     years = comm.scatter(years, root=0)
@@ -66,12 +81,9 @@ def main():
         for j in range(1,days+1):
             #run through the analysis but stop after calculating area
             date = rp.DateTest(month=usrMonth+1, day=j, year=i, length=LENGTH, dataset=DATASET)
+            date.getExtremePoints()
             date.kde()
-            perc = date.calcKDEPercentile(90)
-            if perc >= DEFAULT_TICK:
-                date.getContours(ticks=perc)
-            else:
-                date.getContours(ticks=DEFAULT_TICK)
+            date.getContours(ticks=DEFAULT_TICK)
             date.calcAreas(areaThreshold=AREA)
             if len(date.polys) > 0:
                 areas.append([num for num in date.areas[list(date.areas.keys())[0]] if num >= AREA])
