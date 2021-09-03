@@ -10,7 +10,7 @@ PRES2iP stands for Prediction of Rainfall Extremes at Subseasonal to Seasonal Pe
 
 ## Relevant Publications (sorted by publication date, most recent at top; last updated 29 July 2021)
 
-Dickinson, T.A., M.B. Richman, and J.C. Furtado, 2021: Subseasonal to Seasonal Extreme Precipitation Events in the Contiguous United States: Generation of a Database and Climatology. *Journal of Climate*, in press. doi: https://doi.org/10.1175/JCLI-D-20-0580.1.
+Dickinson, T.A., M.B. Richman, and J.C. Furtado, 2021: Subseasonal to Seasonal Extreme Precipitation Events in the Contiguous United States: Generation of a Database and Climatology. *Journal of Climate*, **34**, 7571-7586. doi: https://doi.org/10.1175/JCLI-D-20-0580.1.
 
 VanBuskirk, O., P. Cwik, R.A. McPherson, H. Lazrus, E. Martin, C. Kuster, and E. Mullens, 2021: Listening to Stakeholders: Initiating Research on Sub-seasonal to Seasonal Heavy Precipitation Events in the Contiguous U.S. by First Understanding What Stakeholders Need. *Bulletin of the American Meteorological Society*, in press. doi: https://doi.org/10.1175/BAMS-D-20-0313.1.
 
