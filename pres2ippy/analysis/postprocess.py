@@ -5,7 +5,8 @@ import pandas as pd
 import shapely.wkt
 from scipy import stats
 import glob
-import geopandas
+#import geopandas
+#import pyproj
 
 def groupEvents(arr, thresh):
     coefs = np.zeros((arr.shape[0]))
@@ -40,7 +41,12 @@ def createMaskedArray(df):
     regionsMasked = regionsMasked.reshape(n,y*x)
     return regionsMasked
 
-files = glob.glob('/share/data1/Students/ty/database/*.csv')
+DATASET = 'livneh'
+LENGTH = 14
+PERCENTILE = 99
+VERSION = 1.0
+
+files = glob.glob(f'/scratch/tdickinson/database/{DATASET}.database.{LENGTH}.*.csv')
 df = pd.concat([pd.read_csv(i) for i in files])
 df = df.astype({'Begin_Date':'datetime64[ns]', 'End_Date':'datetime64[ns]'})
 df = df.sort_values('Begin_Date')
@@ -66,9 +72,9 @@ while True:
         #remove events with correlation >= 0.5
         df.drop(iloc, inplace=True)
         df.reset_index(drop=True, inplace=True)
-        print(len(df))
+        #print(len(df))
 
-    print('\n')
+    #print('\n')
     df = pd.DataFrame(events)
     df = df.sort_values('Begin_Date')
     df.reset_index(drop=True, inplace=True)
@@ -76,8 +82,13 @@ while True:
         break
 
 polys = [shapely.wkt.loads(i) for i in df.geometry]
-df.to_csv('/share/data1/Students/ty/database/database_14_v1.2.csv', index=False)
+df.to_csv(f'/scratch/tdickinson/database/{DATASET}_database_{LENGTH}_p{PERCENTILE}_v{VERSION}.csv', index=False)
 
-df = df.astype({'Begin_Date':str, 'End_Date':str})
-gdf = geopandas.GeoDataFrame(df, geometry=polys)
-gdf.to_file('/share/data1/Students/ty/database/database_14_v1.2.shp')
+try:
+    import geopandas
+    df = df.astype({'Begin_Date':str, 'End_Date':str})
+    gdf = geopandas.GeoDataFrame(df, geometry=polys)
+    crs = '+ellps=WGS84 +proj=aea +lon_0=250 +lat_0=35 +x_0=0.0 +y_0=0.0 +lat_1=20.0 +lat_2=50.0 +no_defs'
+    gdf.to_file(f'/scratch/tdickinson/database/{DATASET}_database_{LENGTH}_p{PERCENTILE}_v{VERSION}.shp')
+except ImportError:
+    print('Could not make shapefile in current environment; could not import geopandas.')
